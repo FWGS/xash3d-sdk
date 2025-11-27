@@ -188,9 +188,9 @@ dependencies = [
 
 [[package]]
 name = "xash3d-ffi"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a7e49bef251bbd2ceaa7d3a58b4afa2659a26b4349f5e5f92d699e7002b1b07"
+checksum = "4e30721fb0ea76f5f6346dd769cae62b70c95f0f21e573efb17e7c4eb9babcc6"
 dependencies = [
  "glam",
  "libc",
