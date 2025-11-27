@@ -251,7 +251,7 @@ impl Strings {
         let offset = id.offset();
         self.data.get(offset).map(|_| unsafe {
             let s = self.data.as_ptr().wrapping_add(offset);
-            CStrThin::from_ptr(s as *const i8)
+            CStrThin::from_ptr(s as *const c_char)
         })
     }
 
