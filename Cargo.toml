@@ -22,7 +22,7 @@ bitflags = "2.6"
 log = "0.4"
 libc = "0.2.172"
 libm = "0.2.15"
-csz = { version = "0.3.0", features = ["alloc"] }
+csz = { version = "0.3.2", features = ["alloc"], git = "https://github.com/FWGS/csz" }
 xash3d-ffi = { version = "0.2", default-features = false, features = ["all", "glam"] }
 xash3d-allocator = { version = "0.1.0", path = "crates/allocator" }
 xash3d-shared = { version = "0.1.0", path = "engine/shared" }

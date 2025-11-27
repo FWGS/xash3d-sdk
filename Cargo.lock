@@ -10,9 +10,8 @@ checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
 
 [[package]]
 name = "csz"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eed14b6b5a4db14e0d014f67183794d016c154b11e965030d1248234b7fea2b3"
+version = "0.3.2"
+source = "git+https://github.com/FWGS/csz#2d9488c1aadfa8fc96e3d27d902b9bf209f4188f"
 
 [[package]]
 name = "glam"
