@@ -1,4 +1,5 @@
 pub mod net;
+pub mod tri;
 
 use core::{
     cmp::Ordering,

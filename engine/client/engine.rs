@@ -1,7 +1,8 @@
 pub mod demo;
 pub mod efx;
 pub mod event;
-pub mod tri;
+
+pub use xash3d_shared::engine::tri;
 
 use core::{
     ffi::{c_char, c_int, c_void},
@@ -16,7 +17,7 @@ use xash3d_shared::{
     export::impl_unsync_global,
     ffi::{
         client::{cl_enginefuncs_s, client_textmessage_s, hud_player_info_s},
-        common::{cl_entity_s, event_args_s, vec3_t, wrect_s},
+        common::{cl_entity_s, event_args_s, model_s, vec3_t, wrect_s},
     },
     str::{AsCStrPtr, ToEngineStr},
     utils::cstr_or_none,
@@ -115,7 +116,6 @@ impl PlayerInfo {
 
 pub struct ClientEngine {
     raw: cl_enginefuncs_s,
-    tri_api: TriangleApi,
     efx_api: EfxApi,
     event_api: EventApi,
     demo_api: DemoApi,
@@ -137,7 +137,6 @@ impl ClientEngine {
     pub(crate) fn new(raw: &cl_enginefuncs_s) -> Self {
         Self {
             raw: *raw,
-            tri_api: TriangleApi::new(raw.pTriAPI),
             efx_api: EfxApi::new(raw.pEfxAPI),
             event_api: EventApi::new(raw.pEventAPI),
             demo_api: DemoApi::new(raw.pDemoAPI),
@@ -159,8 +158,23 @@ impl ClientEngine {
         unsafe { GlobalStateRef::new() }
     }
 
+    /// Returns a shared reference to the triangle API, or returns `None` if not supported by the
+    /// engine.
+    pub fn try_tri_api(&self) -> Option<&TriangleApi> {
+        if !self.raw.pTriAPI.is_null() {
+            Some(TriangleApi::new(unsafe { &*self.raw.pTriAPI }))
+        } else {
+            None
+        }
+    }
+
+    /// Returns a shared reference to the triangle API.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the engine does not support the tirangle API.
     pub fn tri_api(&self) -> &TriangleApi {
-        &self.tri_api
+        self.try_tri_api().expect("triangle api must be present")
     }
 
     pub fn efx_api(&self) -> &EfxApi {
@@ -534,7 +548,16 @@ impl ClientEngine {
     //     Option<unsafe extern "C" fn(modelname: *const c_char, index: *mut c_int) -> *mut model_s>,
     // pub CL_CreateVisibleEntity:
     //     Option<unsafe extern "C" fn(type_: c_int, ent: *mut cl_entity_s) -> c_int>,
-    // pub GetSpritePointer: Option<unsafe extern "C" fn(hSprite: HSPRITE) -> *const model_s>,
+
+    pub fn get_sprite_model_raw(&self, sprite: SpriteHandle) -> Option<&model_s> {
+        let model = unsafe { unwrap!(self, GetSpritePointer)(sprite.raw()) };
+        if !model.is_null() {
+            Some(unsafe { &*model })
+        } else {
+            None
+        }
+    }
+
     // pub pfnPlaySoundByNameAtLocation:
     //     Option<unsafe extern "C" fn(szSound: *mut c_char, volume: f32, origin: *mut f32)>,
     // pub pfnPrecacheEvent:

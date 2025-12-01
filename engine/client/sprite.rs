@@ -95,6 +95,47 @@ impl SpriteHandle {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct SpriteTexCoords {
+    left: f32,
+    right: f32,
+    top: f32,
+    bottom: f32,
+}
+
+impl SpriteTexCoords {
+    fn new(width: i32, height: i32, rect: &wrect_s) -> Self {
+        let width = width as f32;
+        let height = height as f32;
+        Self {
+            left: rect.left as f32 / width,
+            right: rect.right as f32 / width,
+            top: rect.top as f32 / height,
+            bottom: rect.bottom as f32 / height,
+        }
+    }
+
+    /// Returns texture coords clockwise from the top-left corner.
+    pub fn cw(&self) -> [[f32; 2]; 4] {
+        [
+            [self.left, self.top],
+            [self.right, self.top],
+            [self.right, self.bottom],
+            [self.left, self.bottom],
+        ]
+    }
+
+    /// Returns texture coords counterclockwise from the top-left corner.
+    pub fn ccw(&self) -> [[f32; 2]; 4] {
+        [
+            [self.left, self.top],
+            [self.left, self.bottom],
+            [self.right, self.bottom],
+            [self.right, self.top],
+        ]
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct Sprite {
     handle: SpriteHandle,
@@ -128,6 +169,12 @@ impl Sprite {
 
     pub fn size(&self) -> (i32, i32) {
         (self.width(), self.height())
+    }
+
+    pub fn tex_coords(&self, frame: i32) -> SpriteTexCoords {
+        let width = self.handle().width(frame);
+        let height = self.handle().height(frame);
+        SpriteTexCoords::new(width, height, &self.rect())
     }
 
     pub fn draw(&self, frame: i32, x: i32, y: i32, color: RGB) {
