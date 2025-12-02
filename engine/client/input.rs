@@ -27,13 +27,13 @@ impl KeyButton {
     }
 
     pub fn state(&self) -> KeyState {
-        let state = unsafe { (*self.raw.get()).state };
+        let state = unsafe { (*self.as_ptr()).state };
         KeyState::from_bits_retain(state)
     }
 
     pub fn set_state(&self, state: KeyState) {
         unsafe {
-            (*self.raw.get()).state = state.bits();
+            (*self.as_ptr()).state = state.bits();
         }
     }
 
@@ -59,8 +59,12 @@ impl KeyButton {
 
     pub fn clear(&self) {
         unsafe {
-            (*self.raw.get()).down.fill(0);
+            (*self.as_ptr()).down.fill(0);
         }
+    }
+
+    pub fn reset(&self) {
+        unsafe { self.as_ptr().write_bytes(0, 1) }
     }
 
     pub fn key_down(&self) {
@@ -72,7 +76,7 @@ impl KeyButton {
             -1
         };
 
-        let down = unsafe { &mut (*self.raw.get()).down };
+        let down = unsafe { &mut (*self.as_ptr()).down };
         if !down.contains(&k) {
             if let Some(i) = down.iter_mut().find(|i| **i == 0) {
                 *i = k;
@@ -89,7 +93,7 @@ impl KeyButton {
         if !s.is_empty() {
             let k = s.to_str().ok().and_then(|s| s.parse().ok()).unwrap_or(0);
 
-            let down = unsafe { &mut (*self.raw.get()).down };
+            let down = unsafe { &mut (*self.as_ptr()).down };
             if let Some(i) = down.iter_mut().find(|i| **i == k) {
                 *i = 0;
 
