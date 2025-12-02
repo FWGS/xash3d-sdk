@@ -63,10 +63,6 @@ impl KeyList {
             kb,
         })
     }
-
-    fn clear(&mut self) {
-        self.list.clear();
-    }
 }
 
 pub struct Input {
@@ -356,11 +352,6 @@ impl Input {
         self.mx_accum = 0;
         self.my_accum = 0;
         self.mouse_oldbuttonstate = 0;
-    }
-
-    pub fn shutdown(&mut self) {
-        self.deactivate_mouse();
-        self.keys.clear();
     }
 
     fn use_raw_input(&self) -> bool {

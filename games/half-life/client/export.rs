@@ -66,12 +66,6 @@ impl_global_getter!(Hud, hud);
 impl_global_getter!(Weapons, weapons);
 impl_global_getter!(StudioRenderer, renderer);
 
-impl Drop for Dll {
-    fn drop(&mut self) {
-        self.input.borrow_mut().shutdown();
-    }
-}
-
 impl ClientDll for Dll {
     fn new(engine: ClientEngineRef) -> Self {
         Self {
