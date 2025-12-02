@@ -123,7 +123,10 @@ impl ClientDll for Dll {
     }
 
     fn create_move(&self, frame_time: f32, active: bool) -> usercmd_s {
-        self.input.borrow_mut().create_move(frame_time, active)
+        let hud = self.hud.borrow();
+        let view = self.view.borrow();
+        let mut input = self.input.borrow_mut();
+        input.create_move(&hud, &view, frame_time, active)
     }
 
     fn post_run_cmd(

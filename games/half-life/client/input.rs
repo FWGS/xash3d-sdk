@@ -22,7 +22,8 @@ use xash3d_client::{
 use crate::{
     export::{hud, input, view},
     helpers,
-    hud::weapon_menu::WeaponMenu,
+    hud::Hud,
+    view::View,
 };
 
 const MOUSE_BUTTON_COUNT: c_int = 5;
@@ -515,16 +516,14 @@ impl Input {
         }
     }
 
-    fn scale_mouse(&mut self) {
+    fn scale_mouse(&mut self, hud: &Hud) {
         let mx = self.mouse_x;
         let my = self.mouse_y;
 
-        let hud = hud();
-        let mouse_senstivity = if hud.get_sensitivity() != 0.0 {
-            hud.get_sensitivity()
-        } else {
-            self.get_mouse_sensitivity()
-        };
+        let mut mouse_senstivity = hud.get_sensitivity();
+        if mouse_senstivity == 0.0 {
+            mouse_senstivity = self.get_mouse_sensitivity()
+        }
 
         if self.m_customaccel.get() != 0.0 {
             let raw_mouse_movement_distance = sqrt((mx * mx + my * my) as f64);
@@ -556,16 +555,16 @@ impl Input {
         }
     }
 
-    fn mouse_move(&mut self, _frametime: f32, cmd: &mut usercmd_s) {
+    fn mouse_move(&mut self, hud: &Hud, view: &View, _frametime: f32, cmd: &mut usercmd_s) {
         let engine = self.engine;
         let mut viewangles = engine.get_view_angles();
 
         let in_mlook_state = self.in_mlook.state();
         if in_mlook_state.contains(KeyState::DOWN) {
-            view().stop_pitch_drift();
+            view.stop_pitch_drift();
         }
 
-        if !self.mouse_in_use.get() && !hud().state.intermission() && !self.mouse_visible {
+        if !self.mouse_in_use.get() && !hud.state.intermission() && !self.mouse_visible {
             let (dx, dy) = self.get_relative_mouse_pos();
 
             let mx = dx + self.mx_accum;
@@ -585,7 +584,7 @@ impl Input {
             self.old_mouse_x = mx;
             self.old_mouse_y = my;
 
-            self.scale_mouse();
+            self.scale_mouse(hud);
 
             if self.in_strafe.is_down()
                 || self.lookstrafe.get() && in_mlook_state.contains(KeyState::DOWN)
@@ -613,7 +612,7 @@ impl Input {
         engine.set_view_angles(viewangles);
     }
 
-    fn adjust_angles(&self, frametime: f32, viewangles: &mut vec3_t) {
+    fn adjust_angles(&self, view: &View, frametime: f32, viewangles: &mut vec3_t) {
         let speed = if self.in_speed.is_down() {
             frametime * self.cl_anglespeedkey.get()
         } else {
@@ -629,7 +628,7 @@ impl Input {
 
         let pitchspeed = self.cl_pitchspeed.get();
         if self.in_klook.is_down() {
-            view().stop_pitch_drift();
+            view.stop_pitch_drift();
             viewangles[PITCH] -= speed * pitchspeed * self.in_forward.key_state();
             viewangles[PITCH] += speed * pitchspeed * self.in_back.key_state();
         }
@@ -641,7 +640,7 @@ impl Input {
         viewangles[PITCH] += speed * pitchspeed * down;
 
         if up != 0.0 || down != 0.0 {
-            view().stop_pitch_drift();
+            view.stop_pitch_drift();
         }
 
         let pitchdown = self.cl_pitchdown.get();
@@ -670,21 +669,27 @@ impl Input {
         self.mouse_oldbuttonstate = mstate;
     }
 
-    fn in_move(&mut self, frametime: f32, cmd: &mut usercmd_s) {
+    fn in_move(&mut self, hud: &Hud, view: &View, frametime: f32, cmd: &mut usercmd_s) {
         if !self.mouse_in_use.get() && self.mouse_active {
-            self.mouse_move(frametime, cmd);
+            self.mouse_move(hud, view, frametime, cmd);
         }
 
         // TODO: joystick
     }
 
-    pub fn create_move(&mut self, frametime: f32, active: bool) -> usercmd_s {
+    pub fn create_move(
+        &mut self,
+        hud: &Hud,
+        view: &View,
+        frametime: f32,
+        active: bool,
+    ) -> usercmd_s {
         let engine = self.engine;
         let mut cmd: usercmd_s = unsafe { mem::zeroed() };
 
         if active {
             let mut viewangles = engine.get_view_angles();
-            self.adjust_angles(frametime, &mut viewangles);
+            self.adjust_angles(view, frametime, &mut viewangles);
             engine.set_view_angles(viewangles);
 
             if self.in_strafe.is_down() {
@@ -731,15 +736,12 @@ impl Input {
                 }
             }
 
-            self.in_move(frametime, &mut cmd);
+            self.in_move(hud, view, frametime, &mut cmd);
         }
 
         cmd.impulse = self.in_impulse.take();
-
-        cmd.weaponselect = hud().items.get_mut::<WeaponMenu>().take_weapon_select() as u8;
-
-        let show_score = hud().show_score();
-        cmd.buttons = self.button_bits(true, show_score) as u16;
+        cmd.weaponselect = hud.take_weapon_select() as u8;
+        cmd.buttons = self.button_bits(true, hud.show_score()) as u16;
 
         let viewangles = engine.get_view_angles();
         if unsafe { helpers::g_iAlive != 0 } {

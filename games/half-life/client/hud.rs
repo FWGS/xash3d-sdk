@@ -665,6 +665,10 @@ impl Hud {
         }
     }
 
+    pub fn take_weapon_select(&self) -> u32 {
+        self.items.get_mut::<WeaponMenu>().take_weapon_select()
+    }
+
     fn think(&self) {
         self.state.think();
 
