@@ -22,12 +22,11 @@ use xash3d_shared::{
 };
 
 use crate::{
-    engine::ServerEngineRef,
-    entity::{AsEntityHandle, EntityHandle, EntityOffset, KeyValue},
-    global_state::GlobalStateRef,
+    entity::{EntityHandle, EntityOffset, KeyValue},
     prelude::*,
     save::{FieldType, SaveFields},
     str::MapString,
+    studio::Model,
     time::MapTime,
 };
 
@@ -517,6 +516,10 @@ impl EntityVars {
     pub fn remove_model(&self) {
         self.set_model_name(None);
         self.set_model_index_raw(0);
+    }
+
+    pub fn model(&self) -> Option<Model<'_>> {
+        Model::new(self)
     }
 
     pub fn set_model(&self, name: impl ToEngineStr) {

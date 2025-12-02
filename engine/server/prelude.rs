@@ -7,7 +7,7 @@ pub use crate::{
 
 pub use crate::{
     entity::{AsEntityHandle, CreateEntity, Entity},
-    global_state::decals::Decals,
+    global_state::{GlobalStateRef, decals::Decals},
     private::{GetPrivateData, PrivateEntity},
 };
 

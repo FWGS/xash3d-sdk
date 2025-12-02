@@ -35,6 +35,7 @@ pub mod private;
 pub mod save;
 pub mod sound;
 pub mod str;
+pub mod studio;
 pub mod time;
 pub mod user_message;
 pub mod utils;
