@@ -113,6 +113,7 @@ pub struct Input {
     in_up: KeyButton,
     in_down: KeyButton,
     in_duck: KeyButton,
+    in_run: KeyButton,
     in_reload: KeyButton,
     in_alt1: KeyButton,
     in_score: KeyButton,
@@ -169,13 +170,13 @@ impl Input {
         hook_command_key!(engine, "klook", input().in_klook);
         hook_command_key!(engine, "mlook", input().in_mlook, up {
             let input = input();
-            let state = input.in_mlook.state();
-            if !state.contains(KeyState::DOWN) && input.lookspring.get() {
+            if !input.in_mlook.is_down() && input.lookspring.get() {
                 view().start_pitch_drift();
             }
         });
         hook_command_key!(engine, "jlook", input().in_jlook);
         hook_command_key!(engine, "duck", input().in_duck);
+        hook_command_key!(engine, "run", input().in_run);
         hook_command_key!(engine, "reload", input().in_reload);
         hook_command_key!(engine, "alt1", input().in_alt1);
         hook_command_key!(engine, "score", input().in_score, down {
@@ -266,6 +267,7 @@ impl Input {
             in_up: KeyButton::new(engine),
             in_down: KeyButton::new(engine),
             in_duck: KeyButton::new(engine),
+            in_run: KeyButton::new(engine),
             in_reload: KeyButton::new(engine),
             in_alt1: KeyButton::new(engine),
             in_score: KeyButton::new(engine),
@@ -389,15 +391,19 @@ impl Input {
     pub fn button_bits(&self, reset_state: bool, show_score: bool) -> c_int {
         let mut bits = 0;
 
-        macro_rules! set {
-            ($($name:expr => $bits:expr),* $(,)?) => (
+        macro_rules! set_bits_and_reset {
+            ($($name:expr => $bits:expr),* $(,)?) => {
                 $(if $name.state().intersects(KeyState::ANY_DOWN) {
                     bits |= $bits;
                 })*
-            );
+
+                if reset_state {
+                    $($name.with_state(|f| f.difference(KeyState::IMPULSE_DOWN));)*
+                }
+            };
         }
 
-        set! {
+        set_bits_and_reset! {
             self.in_attack => consts::IN_ATTACK,
             self.in_duck => consts::IN_DUCK,
             self.in_jump => consts::IN_JUMP,
@@ -409,6 +415,7 @@ impl Input {
             self.in_moveleft => consts::IN_MOVELEFT,
             self.in_moveright => consts::IN_MOVERIGHT,
             self.in_attack2 => consts::IN_ATTACK2,
+            self.in_run => consts::IN_RUN,
             self.in_reload => consts::IN_RELOAD,
             self.in_alt1 => consts::IN_ALT1,
             self.in_score => consts::IN_SCORE,
@@ -420,30 +427,6 @@ impl Input {
 
         if show_score {
             bits |= consts::IN_SCORE;
-        }
-
-        if reset_state {
-            macro_rules! reset {
-                ($($name:expr),* $(,)?) => (
-                    $($name.with_state(|f| f.difference(KeyState::IMPULSE_DOWN));)*
-                );
-            }
-            reset! {
-                self.in_attack,
-                self.in_duck,
-                self.in_jump,
-                self.in_forward,
-                self.in_back,
-                self.in_use,
-                self.in_left,
-                self.in_right,
-                self.in_moveleft,
-                self.in_moveright,
-                self.in_attack2,
-                self.in_reload,
-                self.in_alt1,
-                self.in_score,
-            }
         }
 
         bits
