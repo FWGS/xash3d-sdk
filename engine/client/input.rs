@@ -6,24 +6,58 @@ use crate::prelude::*;
 
 pub use xash3d_shared::input::*;
 
-pub struct KeyButton {
-    engine: ClientEngineRef,
+/// Key button data.
+pub struct KeyButtonData {
     raw: UnsafeCell<kbutton_t>,
+    bits: u32,
 }
 
-impl KeyButton {
-    pub fn new(engine: ClientEngineRef) -> Self {
+// SAFETY: only used by KeyButton from the engine thread
+unsafe impl Sync for KeyButtonData {}
+
+impl KeyButtonData {
+    /// Creates a new key button data.
+    #[allow(clippy::new_without_default)]
+    pub const fn new() -> Self {
+        Self::with_bits(0)
+    }
+
+    /// Creates a new key button data with button bits.
+    pub const fn with_bits(bits: u32) -> Self {
         Self {
-            engine,
             raw: UnsafeCell::new(kbutton_t {
                 down: [0; 2],
                 state: 0,
             }),
+            bits,
         }
     }
 
-    pub fn as_ptr(&self) -> *mut kbutton_t {
+    fn get(&self) -> *mut kbutton_t {
         self.raw.get()
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct KeyButton {
+    engine: ClientEngineRef,
+    data: &'static KeyButtonData,
+}
+
+impl KeyButton {
+    pub const fn new(engine: ClientEngineRef, data: &'static KeyButtonData) -> Self {
+        Self { engine, data }
+    }
+
+    pub fn as_ptr(&self) -> *mut kbutton_t {
+        self.data.get()
+    }
+
+    /// Button bits for this button.
+    ///
+    /// Used to set [usercmd_s.buttons](xash3d_ffi::common::usercmd_s.buttons).
+    pub fn bits(&self) -> u32 {
+        self.data.bits
     }
 
     pub fn state(&self) -> KeyState {
@@ -42,7 +76,7 @@ impl KeyButton {
     }
 
     pub fn is_down(&self) -> bool {
-        self.state().contains(KeyState::DOWN)
+        self.state().intersects(KeyState::DOWN)
     }
 
     pub fn is_up(&self) -> bool {
@@ -55,6 +89,11 @@ impl KeyButton {
 
     pub fn is_impulse_up(&self) -> bool {
         self.state().intersects(KeyState::IMPULSE_UP)
+    }
+
+    pub fn is_down_or_impulse_down(&self) -> bool {
+        self.state()
+            .intersects(KeyState::DOWN | KeyState::IMPULSE_DOWN)
     }
 
     pub fn clear(&self) {

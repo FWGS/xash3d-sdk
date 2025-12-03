@@ -208,7 +208,7 @@ pub struct State {
     last_fov: Cell<u8>,
     fov: Cell<u8>,
     mouse_sensitivity: Cell<f32>,
-    key_bits: Cell<i32>,
+    key_bits: Cell<u32>,
 
     /// Player inventory.
     inv: RefCell<Inventory>,
@@ -313,15 +313,15 @@ impl State {
         self.fov.get()
     }
 
-    pub fn key_bits(&self) -> i32 {
+    pub fn key_bits(&self) -> u32 {
         self.key_bits.get()
     }
 
-    pub fn set_key_bits(&self, bits: i32) {
+    pub fn set_key_bits(&self, bits: u32) {
         self.key_bits.set(bits);
     }
 
-    pub fn with_key_bits(&self, map: impl FnOnce(i32) -> i32) {
+    pub fn with_key_bits(&self, map: impl FnOnce(u32) -> u32) {
         self.set_key_bits(map(self.key_bits()));
     }
 

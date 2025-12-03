@@ -4,16 +4,16 @@ use core::{
     mem,
 };
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
 use xash3d_client::{
     consts::{self, PITCH, ROLL, YAW},
-    csz::{CStrBox, CStrThin},
+    csz::CStrThin,
     cvar::{self, Cvar},
     ffi::{
-        common::{kbutton_t, usercmd_s, vec3_t},
+        common::{usercmd_s, vec3_t},
         keys,
     },
-    input::{KeyButton, KeyState},
+    input::{KeyButton, KeyButtonData, KeyState},
     macros::{hook_command, hook_command_key},
     math::{angle_mod, pow, sqrt, sqrtf},
     prelude::*,
@@ -37,34 +37,69 @@ impl Mouse {
 }
 
 struct Key {
-    name: CStrBox,
-    kb: *mut kbutton_t,
+    name: &'static CStrThin,
+    kb: KeyButton,
 }
 
 pub struct KeyList {
+    engine: ClientEngineRef,
     list: Vec<Key>,
 }
 
 impl KeyList {
-    fn new() -> Self {
-        Self { list: Vec::new() }
-    }
-
-    pub fn find(&self, name: &CStrThin) -> Option<*mut kbutton_t> {
-        self.list.iter().find(|i| i.name == *name).map(|i| i.kb)
-    }
-
-    fn add(&mut self, name: &CStr, kb: *mut kbutton_t) {
-        if self.find(name.into()).is_some() {
-            return;
+    fn new(engine: ClientEngineRef) -> Self {
+        Self {
+            engine,
+            list: Vec::new(),
         }
+    }
 
+    pub fn find(&self, name: impl AsRef<CStrThin>) -> Option<KeyButton> {
+        self.list
+            .iter()
+            .find(|i| i.name == name.as_ref())
+            .map(|i| i.kb)
+    }
+
+    fn add(&mut self, name: &'static CStr, data: &'static KeyButtonData) -> KeyButton {
+        if self.find(name).is_some() {
+            panic!("the key button {name:?} has already been added");
+        }
+        let kb = KeyButton::new(self.engine, data);
         self.list.push(Key {
             name: name.into(),
             kb,
-        })
+        });
+        kb
     }
 }
+
+static IN_GRAPH: KeyButtonData = KeyButtonData::new();
+static IN_MLOOK: KeyButtonData = KeyButtonData::new();
+static IN_JLOOK: KeyButtonData = KeyButtonData::new();
+static IN_KLOOK: KeyButtonData = KeyButtonData::new();
+static IN_LEFT: KeyButtonData = KeyButtonData::with_bits(consts::IN_LEFT as u32);
+static IN_RIGHT: KeyButtonData = KeyButtonData::with_bits(consts::IN_RIGHT as u32);
+static IN_FORWARD: KeyButtonData = KeyButtonData::with_bits(consts::IN_FORWARD as u32);
+static IN_BACK: KeyButtonData = KeyButtonData::with_bits(consts::IN_BACK as u32);
+static IN_LOOKUP: KeyButtonData = KeyButtonData::new();
+static IN_LOOKDOWN: KeyButtonData = KeyButtonData::new();
+static IN_MOVELEFT: KeyButtonData = KeyButtonData::with_bits(consts::IN_MOVELEFT as u32);
+static IN_MOVERIGHT: KeyButtonData = KeyButtonData::with_bits(consts::IN_MOVERIGHT as u32);
+static IN_STRAFE: KeyButtonData = KeyButtonData::new();
+static IN_SPEED: KeyButtonData = KeyButtonData::new();
+static IN_USE: KeyButtonData = KeyButtonData::with_bits(consts::IN_USE as u32);
+static IN_JUMP: KeyButtonData = KeyButtonData::with_bits(consts::IN_JUMP as u32);
+static IN_ATTACK: KeyButtonData = KeyButtonData::with_bits(consts::IN_ATTACK as u32);
+static IN_ATTACK2: KeyButtonData = KeyButtonData::with_bits(consts::IN_ATTACK2 as u32);
+static IN_UP: KeyButtonData = KeyButtonData::new();
+static IN_DOWN: KeyButtonData = KeyButtonData::new();
+static IN_DUCK: KeyButtonData = KeyButtonData::with_bits(consts::IN_DUCK as u32);
+static IN_RUN: KeyButtonData = KeyButtonData::with_bits(consts::IN_RUN as u32);
+static IN_RELOAD: KeyButtonData = KeyButtonData::with_bits(consts::IN_RELOAD as u32);
+static IN_ALT1: KeyButtonData = KeyButtonData::with_bits(consts::IN_ALT1 as u32);
+static IN_SCORE: KeyButtonData = KeyButtonData::with_bits(consts::IN_SCORE as u32);
+static IN_BREAK: KeyButtonData = KeyButtonData::new();
 
 pub struct Input {
     engine: ClientEngineRef,
@@ -92,9 +127,9 @@ pub struct Input {
     mouse_x: f32,
     mouse_y: f32,
 
-    in_graph: Box<KeyButton>,
-    in_mlook: Box<KeyButton>,
-    in_jlook: Box<KeyButton>,
+    in_graph: KeyButton,
+    in_mlook: KeyButton,
+    in_jlook: KeyButton,
     in_klook: KeyButton,
     in_left: KeyButton,
     in_right: KeyButton,
@@ -212,19 +247,11 @@ impl Input {
             // TODO: joystick
         });
 
-        let in_graph = Box::new(KeyButton::new(engine));
-        let in_mlook = Box::new(KeyButton::new(engine));
-        let in_jlook = Box::new(KeyButton::new(engine));
-
-        let mut keys = KeyList::new();
-        keys.add(c"in_graph", (*in_graph).as_ptr());
-        keys.add(c"in_mlook", (*in_mlook).as_ptr());
-        keys.add(c"in_jlook", (*in_jlook).as_ptr());
+        let mut keys = KeyList::new(engine);
 
         Self {
             engine,
 
-            keys,
             oldangles: vec3_t::ZERO,
             mouse: Mouse::new(),
 
@@ -246,32 +273,34 @@ impl Input {
             mouse_x: 0.0,
             mouse_y: 0.0,
 
-            in_graph,
-            in_mlook,
-            in_jlook,
-            in_klook: KeyButton::new(engine),
-            in_left: KeyButton::new(engine),
-            in_right: KeyButton::new(engine),
-            in_forward: KeyButton::new(engine),
-            in_back: KeyButton::new(engine),
-            in_lookup: KeyButton::new(engine),
-            in_lookdown: KeyButton::new(engine),
-            in_moveleft: KeyButton::new(engine),
-            in_moveright: KeyButton::new(engine),
-            in_strafe: KeyButton::new(engine),
-            in_speed: KeyButton::new(engine),
-            in_use: KeyButton::new(engine),
-            in_jump: KeyButton::new(engine),
-            in_attack: KeyButton::new(engine),
-            in_attack2: KeyButton::new(engine),
-            in_up: KeyButton::new(engine),
-            in_down: KeyButton::new(engine),
-            in_duck: KeyButton::new(engine),
-            in_run: KeyButton::new(engine),
-            in_reload: KeyButton::new(engine),
-            in_alt1: KeyButton::new(engine),
-            in_score: KeyButton::new(engine),
-            in_break: KeyButton::new(engine),
+            in_graph: keys.add(c"in_graph", &IN_GRAPH),
+            in_mlook: keys.add(c"in_mlook", &IN_MLOOK),
+            in_jlook: keys.add(c"in_jlook", &IN_JLOOK),
+            in_klook: keys.add(c"in_klook", &IN_KLOOK),
+            in_left: keys.add(c"in_left", &IN_LEFT),
+            in_right: keys.add(c"in_right", &IN_RIGHT),
+            in_forward: keys.add(c"in_forward", &IN_FORWARD),
+            in_back: keys.add(c"in_back", &IN_BACK),
+            in_lookup: keys.add(c"in_lookup", &IN_LOOKUP),
+            in_lookdown: keys.add(c"in_lookdown", &IN_LOOKDOWN),
+            in_moveleft: keys.add(c"in_moveleft", &IN_MOVELEFT),
+            in_moveright: keys.add(c"in_moveright", &IN_MOVERIGHT),
+            in_strafe: keys.add(c"in_strafe", &IN_STRAFE),
+            in_speed: keys.add(c"in_speed", &IN_SPEED),
+            in_use: keys.add(c"in_use", &IN_USE),
+            in_jump: keys.add(c"in_jump", &IN_JUMP),
+            in_attack: keys.add(c"in_attack", &IN_ATTACK),
+            in_attack2: keys.add(c"in_attack2", &IN_ATTACK2),
+            in_up: keys.add(c"in_up", &IN_UP),
+            in_down: keys.add(c"in_down", &IN_DOWN),
+            in_duck: keys.add(c"in_duck", &IN_DUCK),
+            in_run: keys.add(c"in_run", &IN_RUN),
+            in_reload: keys.add(c"in_reload", &IN_RELOAD),
+            in_alt1: keys.add(c"in_alt1", &IN_ALT1),
+            in_score: keys.add(c"in_score", &IN_SCORE),
+            in_break: keys.add(c"in_break", &IN_BREAK),
+
+            keys,
 
             lookstrafe: engine
                 .create_cvar(c"lookstrafe", c"0", cvar::ARCHIVE)
@@ -388,55 +417,29 @@ impl Input {
         self.in_mlook.state()
     }
 
-    pub fn button_bits(&self, reset_state: bool, show_score: bool) -> c_int {
+    pub fn button_bits(&self, reset_state: bool, show_score: bool) -> u32 {
         let mut bits = 0;
-
-        macro_rules! set_bits_and_reset {
-            ($($name:expr => $bits:expr),* $(,)?) => {
-                $(if $name.state().intersects(KeyState::ANY_DOWN) {
-                    bits |= $bits;
-                })*
-
-                if reset_state {
-                    $($name.with_state(|f| f.difference(KeyState::IMPULSE_DOWN));)*
-                }
-            };
+        for i in self.keys.list.iter().filter(|i| i.kb.bits() != 0) {
+            if i.kb.is_down_or_impulse_down() {
+                bits |= i.kb.bits();
+            }
+            if reset_state {
+                i.kb.with_state(|f| f.difference(KeyState::IMPULSE_DOWN));
+            }
         }
-
-        set_bits_and_reset! {
-            self.in_attack => consts::IN_ATTACK,
-            self.in_duck => consts::IN_DUCK,
-            self.in_jump => consts::IN_JUMP,
-            self.in_forward => consts::IN_FORWARD,
-            self.in_back => consts::IN_BACK,
-            self.in_use => consts::IN_USE,
-            self.in_left => consts::IN_LEFT,
-            self.in_right => consts::IN_RIGHT,
-            self.in_moveleft => consts::IN_MOVELEFT,
-            self.in_moveright => consts::IN_MOVERIGHT,
-            self.in_attack2 => consts::IN_ATTACK2,
-            self.in_run => consts::IN_RUN,
-            self.in_reload => consts::IN_RELOAD,
-            self.in_alt1 => consts::IN_ALT1,
-            self.in_score => consts::IN_SCORE,
-        }
-
         if self.in_cancel.get() {
-            bits |= consts::IN_CANCEL;
+            bits |= consts::IN_CANCEL as u32;
         }
-
         if show_score {
-            bits |= consts::IN_SCORE;
+            bits |= consts::IN_SCORE as u32;
         }
-
         bits
     }
 
-    pub fn reset_button_bits(&self, bits: c_int, show_score: bool) {
+    pub fn reset_button_bits(&self, bits: u32, show_score: bool) {
         let bits_new = self.button_bits(false, show_score) ^ bits;
-
-        if bits_new & consts::IN_ATTACK != 0 {
-            if bits & consts::IN_ATTACK != 0 {
+        if bits_new & consts::IN_ATTACK as u32 != 0 {
+            if bits & consts::IN_ATTACK as u32 != 0 {
                 self.in_attack.key_down();
             } else {
                 self.in_attack.set_state(KeyState::NONE);

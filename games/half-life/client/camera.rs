@@ -4,7 +4,7 @@ use xash3d_client::{
     consts::{PITCH, ROLL, YAW},
     cvar::{Cvar, NO_FLAGS},
     ffi::common::vec3_t,
-    input::KeyButton,
+    input::{KeyButton, KeyButtonData},
     macros::{hook_command, hook_command_key},
     math::fabsf,
     prelude::*,
@@ -29,6 +29,13 @@ const CAM_ANGLE_MOVE: f32 = 0.5;
 // const PITCH_MIN: f32 = 0.0;
 // const YAW_MAX: f32 = 135.0;
 // const YAW_MIN: f32 = -135.0;
+
+static CAM_PITCHUP: KeyButtonData = KeyButtonData::new();
+static CAM_PITCHDOWN: KeyButtonData = KeyButtonData::new();
+static CAM_YAWLEFT: KeyButtonData = KeyButtonData::new();
+static CAM_YAWRIGHT: KeyButtonData = KeyButtonData::new();
+static CAM_IN: KeyButtonData = KeyButtonData::new();
+static CAM_OUT: KeyButtonData = KeyButtonData::new();
 
 pub struct Camera {
     engine: ClientEngineRef,
@@ -84,12 +91,12 @@ impl Camera {
             cam_distancemove: Cell::default(),
             cam_ofs: Cell::default(),
 
-            cam_pitchup: KeyButton::new(engine),
-            cam_pitchdown: KeyButton::new(engine),
-            cam_yawleft: KeyButton::new(engine),
-            cam_yawright: KeyButton::new(engine),
-            cam_in: KeyButton::new(engine),
-            cam_out: KeyButton::new(engine),
+            cam_pitchup: KeyButton::new(engine, &CAM_PITCHUP),
+            cam_pitchdown: KeyButton::new(engine, &CAM_PITCHDOWN),
+            cam_yawleft: KeyButton::new(engine, &CAM_YAWLEFT),
+            cam_yawright: KeyButton::new(engine, &CAM_YAWRIGHT),
+            cam_in: KeyButton::new(engine, &CAM_IN),
+            cam_out: KeyButton::new(engine, &CAM_OUT),
 
             cam_command: engine.create_cvar(c"cam_command", c"0", NO_FLAGS).unwrap(),
             cam_snapto: engine.create_cvar(c"cam_snapto", c"0", NO_FLAGS).unwrap(),

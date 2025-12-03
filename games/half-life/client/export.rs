@@ -164,6 +164,7 @@ impl ClientDll for Dll {
             .borrow()
             .keys
             .find(name)
+            .map(|i| i.as_ptr())
             .unwrap_or(ptr::null_mut())
     }
 
