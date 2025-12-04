@@ -21,7 +21,6 @@ use core::{
     cmp,
     ffi::c_int,
     fmt::Write,
-    ops::Deref,
 };
 
 use alloc::{rc::Rc, string::String, vec::Vec};
@@ -184,7 +183,119 @@ pub struct PlayerInfoExtra {
     pub teamnumber: i16,
 }
 
-pub struct State {
+#[must_use]
+struct DrawNumber<'a> {
+    engine: ClientEngineRef,
+    digits: Ref<'a, DigitSprites>,
+    width: usize,
+    number: c_int,
+    color: RGB,
+    zero: bool,
+    string: bool,
+    reverse: bool,
+}
+
+impl DrawNumber<'_> {
+    fn width(mut self, width: usize) -> Self {
+        self.width = width;
+        self
+    }
+
+    // fn no_zero(mut self) -> Self {
+    //     self.zero = false;
+    //     self
+    // }
+
+    fn color(mut self, color: RGB) -> Self {
+        self.color = color;
+        self
+    }
+
+    fn string(mut self, string: bool) -> Self {
+        self.string = string;
+        self
+    }
+
+    fn reverse(mut self, reverse: bool) -> Self {
+        self.reverse = reverse;
+        self
+    }
+
+    fn at(self, x: c_int, y: c_int) -> c_int {
+        if self.number == 0 && !self.zero {
+            return x + self.digits.width() * self.width as c_int;
+        }
+
+        let mut buf = CStrArray::<64>::new();
+        write!(buf.cursor(), "{:1$}", self.number, self.width).ok();
+
+        let engine = self.engine;
+        if self.string {
+            if self.reverse {
+                return engine.draw_string_reverse(x, y, buf.as_c_str(), self.color);
+            } else {
+                return engine.draw_string(x, y, buf.as_c_str(), self.color);
+            }
+        }
+
+        if self.reverse {
+            todo!("draw number reverse is not implemented for sprites");
+        }
+
+        let mut x = x;
+        for c in buf.bytes() {
+            if let Some(digit) = self.digits.get_by_char(c as char) {
+                digit.draw_additive(0, x, y, self.color);
+            }
+            x += self.digits.width();
+        }
+        x
+    }
+}
+
+type RcCell<T> = Rc<RefCell<T>>;
+
+#[derive(Default)]
+pub struct Items {
+    items: Vec<(TypeId, RcCell<dyn HudItem>)>,
+}
+
+impl Items {
+    pub fn add<T: HudItem + 'static>(&mut self, value: T) -> &mut Self {
+        let id = value.type_id();
+        let item = Rc::new(RefCell::new(value));
+        match self.items.binary_search_by_key(&id, |(id, _)| *id) {
+            Ok(index) => self.items[index].1 = item,
+            Err(index) => self.items.insert(index, (id, item)),
+        }
+        self
+    }
+
+    pub fn find<T: Any>(&self) -> Option<&RcCell<T>> {
+        let id = TypeId::of::<T>();
+        match self.items.binary_search_by_key(&id, |(i, _)| *i) {
+            Ok(i) => {
+                let item = &self.items[i].1 as *const RcCell<dyn HudItem>;
+                Some(unsafe { &*(item as *const RcCell<T>) })
+            }
+            Err(_) => None,
+        }
+    }
+
+    pub fn get<T: Any>(&self) -> Ref<'_, T> {
+        self.find::<T>().unwrap().borrow()
+    }
+
+    pub fn get_mut<T: Any>(&self) -> RefMut<'_, T> {
+        self.find::<T>().unwrap().borrow_mut()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = RefMut<'_, dyn HudItem>> {
+        self.items.iter().map(|(_, i)| i.borrow_mut())
+    }
+}
+
+pub struct Hud {
     engine: ClientEngineRef,
 
     /// Is the game in an intermission/pause?
@@ -223,12 +334,47 @@ pub struct State {
 
     server_name: RefCell<CStrBox>,
     player_info_extra: RefCell<[Option<PlayerInfoExtra>; MAX_PLAYERS + 1]>,
+
+    items: Items,
+
+    #[allow(dead_code)]
+    text_message: TextMessage,
+
+    logo: Cell<bool>,
+    logo_hspr: Cell<Option<SpriteHandle>>,
+    old_hud_color: RefCell<String>,
+
+    zoom_sensitivity_ratio: Cvar,
+    default_fov: Cvar<u8>,
+    hud_draw: Cvar<bool>,
+    hud_color: Cvar<CStrThin>,
 }
 
-impl State {
-    fn new(engine: ClientEngineRef) -> Self {
+impl Hud {
+    pub fn new(engine: ClientEngineRef) -> Self {
+        hook_messages_and_commands(engine);
+
+        let mut items = Items::default();
+        items
+            .add(ammo::Ammo::new(engine))
+            .add(history::History::new(engine))
+            .add(weapon_menu::WeaponMenu::new(engine))
+            .add(health::Health::new(engine))
+            .add(battery::Battery::new(engine))
+            .add(flashlight::Flashlight::new(engine))
+            .add(geiger::Geiger::new(engine))
+            .add(train::Train::new(engine))
+            .add(death_notice::DeathNotice::new(engine))
+            .add(say_text::SayText::new(engine))
+            .add(menu::Menu::new(engine))
+            .add(message::HudMessage::new(engine))
+            .add(scoreboard::ScoreBoard::new(engine));
+
+        engine.register_cvar(c"cl_autowepswitch", c"1", cvar::ARCHIVE | cvar::USER_INFO);
+
         Self {
             engine,
+
             intermission: Cell::default(),
             time_old: Cell::default(),
             time: Cell::new(1.0),
@@ -247,6 +393,27 @@ impl State {
             digits: RefCell::new(DigitSprites::new()),
             server_name: RefCell::default(),
             player_info_extra: RefCell::new([None; MAX_PLAYERS + 1]),
+
+            items,
+
+            text_message: TextMessage::new(engine),
+
+            logo: Cell::default(),
+            logo_hspr: Cell::default(),
+            old_hud_color: RefCell::default(),
+
+            zoom_sensitivity_ratio: engine
+                .create_cvar(c"zoom_sensitivity_ratio", c"1.2", cvar::ARCHIVE)
+                .unwrap(),
+            default_fov: engine
+                .create_cvar(c"default_fov", c"90", cvar::ARCHIVE)
+                .unwrap(),
+            hud_draw: engine
+                .create_cvar(c"hud_draw", c"1", cvar::ARCHIVE)
+                .unwrap(),
+            hud_color: engine
+                .create_cvar(c"hud_color", c"", cvar::ARCHIVE)
+                .unwrap(),
         }
     }
 
@@ -380,190 +547,13 @@ impl State {
             _ => GREY,
         }
     }
-}
-
-#[must_use]
-struct DrawNumber<'a> {
-    engine: ClientEngineRef,
-    digits: Ref<'a, DigitSprites>,
-    width: usize,
-    number: c_int,
-    color: RGB,
-    zero: bool,
-    string: bool,
-    reverse: bool,
-}
-
-impl DrawNumber<'_> {
-    fn width(mut self, width: usize) -> Self {
-        self.width = width;
-        self
-    }
-
-    // fn no_zero(mut self) -> Self {
-    //     self.zero = false;
-    //     self
-    // }
-
-    fn color(mut self, color: RGB) -> Self {
-        self.color = color;
-        self
-    }
-
-    fn string(mut self, string: bool) -> Self {
-        self.string = string;
-        self
-    }
-
-    fn reverse(mut self, reverse: bool) -> Self {
-        self.reverse = reverse;
-        self
-    }
-
-    fn at(self, x: c_int, y: c_int) -> c_int {
-        if self.number == 0 && !self.zero {
-            return x + self.digits.width() * self.width as c_int;
-        }
-
-        let mut buf = CStrArray::<64>::new();
-        write!(buf.cursor(), "{:1$}", self.number, self.width).ok();
-
-        let engine = self.engine;
-        if self.string {
-            if self.reverse {
-                return engine.draw_string_reverse(x, y, buf.as_c_str(), self.color);
-            } else {
-                return engine.draw_string(x, y, buf.as_c_str(), self.color);
-            }
-        }
-
-        if self.reverse {
-            todo!("draw number reverse is not implemented for sprites");
-        }
-
-        let mut x = x;
-        for c in buf.bytes() {
-            if let Some(digit) = self.digits.get_by_char(c as char) {
-                digit.draw_additive(0, x, y, self.color);
-            }
-            x += self.digits.width();
-        }
-        x
-    }
-}
-
-type RcCell<T> = Rc<RefCell<T>>;
-
-#[derive(Default)]
-pub struct Items {
-    items: Vec<(TypeId, RcCell<dyn HudItem>)>,
-}
-
-impl Items {
-    pub fn add<T: HudItem + 'static>(&mut self, value: T) -> &mut Self {
-        let id = value.type_id();
-        let item = Rc::new(RefCell::new(value));
-        match self.items.binary_search_by_key(&id, |(id, _)| *id) {
-            Ok(index) => self.items[index].1 = item,
-            Err(index) => self.items.insert(index, (id, item)),
-        }
-        self
-    }
-
-    pub fn find<T: Any>(&self) -> Option<&RcCell<T>> {
-        let id = TypeId::of::<T>();
-        match self.items.binary_search_by_key(&id, |(i, _)| *i) {
-            Ok(i) => {
-                let item = &self.items[i].1 as *const RcCell<dyn HudItem>;
-                Some(unsafe { &*(item as *const RcCell<T>) })
-            }
-            Err(_) => None,
-        }
-    }
-
-    pub fn get<T: Any>(&self) -> Ref<'_, T> {
-        self.find::<T>().unwrap().borrow()
-    }
-
-    pub fn get_mut<T: Any>(&self) -> RefMut<'_, T> {
-        self.find::<T>().unwrap().borrow_mut()
-    }
-
-    fn iter(&self) -> impl Iterator<Item = RefMut<'_, dyn HudItem>> {
-        self.items.iter().map(|(_, i)| i.borrow_mut())
-    }
-}
-
-pub struct Hud {
-    engine: ClientEngineRef,
-
-    state: State,
-    items: Items,
-
-    #[allow(dead_code)]
-    text_message: TextMessage,
-
-    logo: Cell<bool>,
-    logo_hspr: Cell<Option<SpriteHandle>>,
-    old_hud_color: RefCell<String>,
-
-    zoom_sensitivity_ratio: Cvar,
-    default_fov: Cvar<u8>,
-    hud_draw: Cvar<bool>,
-    hud_color: Cvar<CStrThin>,
-}
-
-impl Hud {
-    pub fn new(engine: ClientEngineRef) -> Self {
-        hook_messages_and_commands(engine);
-
-        let mut items = Items::default();
-        items
-            .add(ammo::Ammo::new(engine))
-            .add(history::History::new(engine))
-            .add(weapon_menu::WeaponMenu::new(engine))
-            .add(health::Health::new(engine))
-            .add(battery::Battery::new(engine))
-            .add(flashlight::Flashlight::new(engine))
-            .add(geiger::Geiger::new(engine))
-            .add(train::Train::new(engine))
-            .add(death_notice::DeathNotice::new(engine))
-            .add(say_text::SayText::new(engine))
-            .add(menu::Menu::new(engine))
-            .add(message::HudMessage::new(engine))
-            .add(scoreboard::ScoreBoard::new(engine));
-
-        engine.register_cvar(c"cl_autowepswitch", c"1", cvar::ARCHIVE | cvar::USER_INFO);
-
-        Self {
-            engine,
-
-            state: State::new(engine),
-            items,
-
-            text_message: TextMessage::new(engine),
-
-            logo: Cell::default(),
-            logo_hspr: Cell::default(),
-            old_hud_color: RefCell::default(),
-
-            zoom_sensitivity_ratio: engine
-                .create_cvar(c"zoom_sensitivity_ratio", c"1.2", cvar::ARCHIVE)
-                .unwrap(),
-            default_fov: engine
-                .create_cvar(c"default_fov", c"90", cvar::ARCHIVE)
-                .unwrap(),
-            hud_draw: engine
-                .create_cvar(c"hud_draw", c"1", cvar::ARCHIVE)
-                .unwrap(),
-            hud_color: engine
-                .create_cvar(c"hud_color", c"", cvar::ARCHIVE)
-                .unwrap(),
-        }
-    }
 
     pub fn get_sensitivity(&self) -> f32 {
         self.mouse_sensitivity.get()
+    }
+
+    pub fn fov(&self) -> u8 {
+        self.fov.get()
     }
 
     pub fn set_fov(&self, fov: u8) {
@@ -586,10 +576,6 @@ impl Hud {
 
     pub fn set_last_fov(&self, fov: u8) {
         self.last_fov.set(fov);
-    }
-
-    pub fn fov(&self) -> u8 {
-        self.fov.get()
     }
 
     pub fn score_info(&self, info: &user_message::ScoreInfo) {
@@ -809,14 +795,6 @@ impl Hud {
 
         self.draw_logo();
         true
-    }
-}
-
-impl Deref for Hud {
-    type Target = State;
-
-    fn deref(&self) -> &Self::Target {
-        &self.state
     }
 }
 
