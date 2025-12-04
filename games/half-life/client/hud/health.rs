@@ -14,7 +14,7 @@ use xash3d_hl_shared::user_message;
 
 use crate::{
     export::hud,
-    hud::{Fade, Hide, Sprite, State, try_spr_load},
+    hud::{Fade, Hide, Hud, Sprite, try_spr_load},
 };
 
 // seconds that image is up
@@ -88,11 +88,11 @@ impl Health {
                     warn!("Damage: unexpected damage flags {damage_bits:08x}");
                     DamageFlags::from_bits_retain(damage_bits)
                 });
-                health.update_tiles(&hud.state, damage_flags);
+                health.update_tiles(&hud, damage_flags);
             }
 
             if damage_taken > 0 || armor > 0 {
-                health.calc_damage_direction(&hud.state, from);
+                health.calc_damage_direction(&hud, from);
             }
 
             Ok(())
@@ -131,22 +131,19 @@ impl Health {
         }
     }
 
-    fn draw_health(&mut self, state: &State) {
+    fn draw_health(&mut self, hud: &Hud) {
         let Some(cross) = self.cross else { return };
         let engine = self.engine;
 
         let a = if self.current > 15 {
-            self.fade.alpha(state.time_delta())
+            self.fade.alpha(hud.time_delta())
         } else {
             255
         };
 
-        let color = self
-            .get_pain_color()
-            .unwrap_or(state.color())
-            .scale_color(a);
+        let color = self.get_pain_color().unwrap_or(hud.color()).scale_color(a);
 
-        let digits = state.digits();
+        let digits = hud.digits();
         let screen_info = engine.screen_info();
         let cross_width = cross.width();
         let mut x = cross_width / 2;
@@ -157,7 +154,7 @@ impl Health {
         x = cross_width + digits.width() / 2;
         y += (digits.height() as f32 * 0.2) as c_int;
 
-        x = state
+        x = hud
             .draw_number(self.current.into())
             .width(3)
             .color(color)
@@ -167,11 +164,11 @@ impl Health {
 
         let height = digits.height();
         let width = digits.width() / 10;
-        engine.fill_rgba(x, y, width, height, state.color().rgba(a));
+        engine.fill_rgba(x, y, width, height, hud.color().rgba(a));
     }
 
-    fn update_tiles(&mut self, state: &State, mut damage_flags: DamageFlags) {
-        let now = state.time();
+    fn update_tiles(&mut self, hud: &Hud, mut damage_flags: DamageFlags) {
+        let now = hud.time();
 
         for i in &mut self.damages {
             if i.flags.intersects(damage_flags) {
@@ -195,7 +192,7 @@ impl Health {
         }
     }
 
-    fn draw_damage(&mut self, state: &State) {
+    fn draw_damage(&mut self, hud: &Hud) {
         if self.damages.is_empty() {
             return;
         }
@@ -204,11 +201,11 @@ impl Health {
         let Some(index) = self.dmg_spr_index else {
             return;
         };
-        let sprites = &state.sprites()[index..];
+        let sprites = &hud.sprites()[index..];
 
-        let now = state.time();
+        let now = hud.time();
         let a = (fabsf(sinf(now * 2.0)) * 256.0) as u8;
-        let color = state.color().scale_color(a);
+        let color = hud.color().scale_color(a);
 
         let width = sprites[0].width();
         let height = sprites[0].height();
@@ -228,19 +225,19 @@ impl Health {
         }
     }
 
-    fn calc_damage_direction(&mut self, state: &State, from: vec3_t) {
+    fn calc_damage_direction(&mut self, hud: &Hud, from: vec3_t) {
         if from == vec3_t::ZERO {
             self.attack = [0.0; 4];
             return;
         }
 
-        let from = from - state.origin();
+        let from = from - hud.origin();
         let dist_to_target = from.length();
 
         if dist_to_target <= 50.0 {
             self.attack = [1.0; 4];
         } else {
-            let av = state.angles().angle_vectors();
+            let av = hud.angles().angle_vectors();
             let from = from.normalize();
             let front = from.dot(av.right());
             let side = from.dot(av.forward());
@@ -265,7 +262,7 @@ impl Health {
         }
     }
 
-    fn draw_pain(&mut self, state: &State) {
+    fn draw_pain(&mut self, hud: &Hud) {
         if self.attack == [0.0; 4] {
             return;
         }
@@ -274,8 +271,8 @@ impl Health {
         let Some(hspr) = self.pain_sprite else { return };
 
         let a = 255;
-        let fade = (state.time_delta() * 2.0) as f32;
-        let color = self.get_pain_color().unwrap_or(state.color());
+        let fade = (hud.time_delta() * 2.0) as f32;
+        let color = self.get_pain_color().unwrap_or(hud.color());
         let screen = engine.screen_info();
         let x = screen.width() / 2;
         let y = screen.height() / 2;
@@ -302,13 +299,13 @@ impl Health {
 }
 
 impl super::HudItem for Health {
-    fn vid_init(&mut self, state: &State) {
+    fn vid_init(&mut self, hud: &Hud) {
         let engine = self.engine;
-        self.cross = state.find_sprite(c"cross");
-        self.pain_sprite = try_spr_load(state.sprite_resolution(), |res| {
+        self.cross = hud.find_sprite(c"cross");
+        self.pain_sprite = try_spr_load(hud.sprite_resolution(), |res| {
             engine.spr_load(format_args!("sprites/{res}_pain.spr"))
         });
-        self.dmg_spr_index = state.find_sprite_index(c"dmg_bio").map(|i| i + 1);
+        self.dmg_spr_index = hud.find_sprite_index(c"dmg_bio").map(|i| i + 1);
     }
 
     fn reset(&mut self) {
@@ -316,15 +313,15 @@ impl super::HudItem for Health {
         self.damages.clear();
     }
 
-    fn draw(&mut self, state: &State) {
+    fn draw(&mut self, hud: &Hud) {
         let engine = self.engine;
 
-        if state.is_hidden(Hide::HEALTH) || engine.is_spectator_only() || !state.has_suit() {
+        if hud.is_hidden(Hide::HEALTH) || engine.is_spectator_only() || !hud.has_suit() {
             return;
         }
 
-        self.draw_health(state);
-        self.draw_damage(state);
-        self.draw_pain(state);
+        self.draw_health(hud);
+        self.draw_damage(hud);
+        self.draw_pain(hud);
     }
 }

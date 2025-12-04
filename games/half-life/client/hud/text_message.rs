@@ -83,7 +83,7 @@ impl TextMessage {
             HUD_PRINTNOTIFY => engine.console_print(msg),
             HUD_PRINTTALK => {
                 let hud = hud();
-                hud.items.get_mut::<SayText>().say_text(&hud.state, msg, -1);
+                hud.items.get_mut::<SayText>().say_text(&hud, msg, -1);
             }
             HUD_PRINTCONSOLE => engine.console_print(msg),
             _ => {

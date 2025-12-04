@@ -9,7 +9,7 @@ use xash3d_hl_shared::user_message;
 
 use crate::{
     export::hud,
-    hud::{Hide, HudItem, State},
+    hud::{Hide, Hud, HudItem},
 };
 
 const MAX_HISTORY: usize = 12;
@@ -43,7 +43,7 @@ impl History {
                 let hud = hud();
                 hud.items
                     .get_mut::<History>()
-                    .add(&hud.state, ItemKind::Ammo(msg.index, msg.count));
+                    .add(&hud, ItemKind::Ammo(msg.index, msg.count));
             }
             Ok(())
         });
@@ -53,17 +53,17 @@ impl History {
             let hud = hud();
             hud.items
                 .get_mut::<History>()
-                .add(&hud.state, ItemKind::Weapon(msg.index));
+                .add(&hud, ItemKind::Weapon(msg.index));
             Ok(())
         });
 
         hook_user_message!(engine, ItemPickup, |_, msg| {
             let msg = msg.read::<user_message::ItemPickup>()?;
             let hud = hud();
-            let index = hud.state.find_sprite_index(msg.classname);
+            let index = hud.find_sprite_index(msg.classname);
             hud.items
                 .get_mut::<History>()
-                .add(&hud.state, ItemKind::Item(index));
+                .add(&hud, ItemKind::Item(index));
             Ok(())
         });
 
@@ -78,16 +78,16 @@ impl History {
         }
     }
 
-    fn add(&mut self, state: &State, kind: ItemKind) {
+    fn add(&mut self, hud: &Hud, kind: ItemKind) {
         let engine = self.engine;
-        let inv = state.inventory();
+        let inv = hud.inventory();
         let height = self.slot as c_int * inv.pickup_gap() + inv.pickup_height();
         let height_max = engine.screen_info().height() - 100;
         if height > height_max || self.slot >= self.items.len() {
             self.slot = 0;
         }
         self.items[self.slot] = Some(Item {
-            time: state.time() + self.hud_drawhistory_time.get(),
+            time: hud.time() + self.hud_drawhistory_time.get(),
             kind,
         });
         self.slot += 1;
@@ -99,18 +99,18 @@ impl HudItem for History {
         self.items.fill(None);
     }
 
-    fn draw(&mut self, state: &State) {
-        if !state.has_suit() || state.is_hidden(Hide::WEAPONS | Hide::ALL) {
+    fn draw(&mut self, hud: &Hud) {
+        if !hud.has_suit() || hud.is_hidden(Hide::WEAPONS | Hide::ALL) {
             return;
         }
 
-        let inv = state.inventory();
+        let inv = hud.inventory();
         let gap = inv.pickup_gap();
         let height = inv.pickup_height();
 
         let engine = self.engine;
         let screen = engine.screen_info();
-        let now = state.time();
+        let now = hud.time();
 
         for i in 0..self.items.len() {
             let item = match self.items[i] {
@@ -128,7 +128,7 @@ impl HudItem for History {
             };
 
             let a = ((item.time - now) * 80.0) as u8;
-            let color = state.color().scale_color(a);
+            let color = hud.color().scale_color(a);
             let mut x = screen.width() - 4;
             let y = screen.height() - height - gap * i as c_int;
 
@@ -141,8 +141,7 @@ impl HudItem for History {
                     x -= icon.width();
                     icon.draw_additive(0, x, y, color);
 
-                    state
-                        .draw_number(count as i32)
+                    hud.draw_number(count as i32)
                         .color(color)
                         .string(true)
                         .reverse(true)
@@ -158,7 +157,7 @@ impl HudItem for History {
                 }
                 ItemKind::Item(index) => {
                     let Some(index) = index else { continue };
-                    let Some(icon) = state.sprite(index) else {
+                    let Some(icon) = hud.sprite(index) else {
                         continue;
                     };
 

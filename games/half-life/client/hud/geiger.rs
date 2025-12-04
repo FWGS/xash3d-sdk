@@ -5,7 +5,7 @@ use xash3d_hl_shared::user_message;
 
 use crate::{
     export::hud,
-    hud::{HudItem, State},
+    hud::{Hud, HudItem},
 };
 
 // cap geiger sounds by 60 fps
@@ -38,13 +38,13 @@ impl HudItem for Geiger {
         self.time = 0.0;
     }
 
-    fn draw(&mut self, state: &State) {
+    fn draw(&mut self, hud: &Hud) {
         if !(1..1000).contains(&self.range) {
             return;
         }
 
-        let now = state.time();
-        if state.time_delta() != 0.0 && self.time >= now {
+        let now = hud.time();
+        if hud.time_delta() != 0.0 && self.time >= now {
             return;
         }
         self.time = now + LIFE;

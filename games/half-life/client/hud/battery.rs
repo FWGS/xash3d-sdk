@@ -5,7 +5,7 @@ use xash3d_hl_shared::user_message;
 
 use crate::{
     export::hud,
-    hud::{Fade, Hide, Sprite, State},
+    hud::{Fade, Hide, Hud, Sprite},
 };
 
 pub struct Battery {
@@ -44,14 +44,14 @@ impl Battery {
 }
 
 impl super::HudItem for Battery {
-    fn vid_init(&mut self, state: &State) {
-        self.suit_empty = state.find_sprite(c"suit_empty");
-        self.suit_full = state.find_sprite(c"suit_full");
+    fn vid_init(&mut self, hud: &Hud) {
+        self.suit_empty = hud.find_sprite(c"suit_empty");
+        self.suit_full = hud.find_sprite(c"suit_full");
     }
 
-    fn draw(&mut self, state: &State) {
+    fn draw(&mut self, hud: &Hud) {
         let engine = self.engine;
-        if state.is_hidden(Hide::HEALTH) || engine.is_spectator_only() || !state.has_suit() {
+        if hud.is_hidden(Hide::HEALTH) || engine.is_spectator_only() || !hud.has_suit() {
             return;
         }
 
@@ -60,10 +60,8 @@ impl super::HudItem for Battery {
             return;
         };
 
-        let digits = state.digits();
-        let color = state
-            .color()
-            .scale_color(self.fade.alpha(state.time_delta()));
+        let digits = hud.digits();
+        let color = hud.color().scale_color(self.fade.alpha(hud.time_delta()));
         let screen_info = engine.screen_info();
         let width = empty.width();
         let mut x = width * 3;
@@ -83,8 +81,7 @@ impl super::HudItem for Battery {
 
         x += width;
         y += (digits.height() as f32 * 0.2) as c_int;
-        state
-            .draw_number(self.current as c_int)
+        hud.draw_number(self.current as c_int)
             .width(3)
             .color(color)
             .at(x, y);

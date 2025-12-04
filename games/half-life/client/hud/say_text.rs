@@ -11,9 +11,10 @@ use xash3d_client::{
 };
 use xash3d_hl_shared::user_message;
 
-use crate::export::hud;
-
-use super::{HudFlags, HudItem, State};
+use crate::{
+    export::hud,
+    hud::{Hud, HudFlags, HudItem},
+};
 
 const MAX_LINES: usize = 5;
 const MAX_CHARS_PER_LINE: usize = 256;
@@ -41,11 +42,9 @@ impl SayText {
         hook_user_message!(engine, SayText, |_, msg| {
             let msg = msg.read::<user_message::SayText>()?;
             let hud = hud();
-            hud.items.get_mut::<SayText>().say_text(
-                &hud.state,
-                msg.text,
-                msg.client_index as c_int,
-            );
+            hud.items
+                .get_mut::<SayText>()
+                .say_text(&hud, msg.text, msg.client_index as c_int);
             Ok(())
         });
 
@@ -64,7 +63,7 @@ impl SayText {
         }
     }
 
-    pub fn say_text(&mut self, state: &State, msg: &CStr, client: c_int) {
+    pub fn say_text(&mut self, hud: &Hud, msg: &CStr, client: c_int) {
         let mut bytes = msg.to_bytes();
         if bytes.is_empty() {
             return;
@@ -79,14 +78,14 @@ impl SayText {
                 let name = info.name().to_bytes();
                 if bytes[1..].starts_with(name) {
                     name_len = name.len();
-                    color = state.get_client_color(client);
+                    color = hud.get_client_color(client);
                     bytes = &bytes[1..];
                 }
             }
         }
 
         if self.lines.is_empty() {
-            self.scroll_time = state.time() + self.hud_saytext_time.get();
+            self.scroll_time = hud.time() + self.hud_saytext_time.get();
         }
 
         // TODO: ensure text fits in one line
@@ -110,21 +109,21 @@ impl HudItem for SayText {
         HudFlags::ACTIVE | HudFlags::INTERMISSION
     }
 
-    fn init_hud_data(&mut self, _: &State) {
+    fn init_hud_data(&mut self, _: &Hud) {
         self.lines.clear();
     }
 
-    fn vid_init(&mut self, _: &State) {
+    fn vid_init(&mut self, _: &Hud) {
         self.line_height = self.engine.console_string_height(c"test");
     }
 
-    fn draw(&mut self, state: &State) {
+    fn draw(&mut self, hud: &Hud) {
         if self.lines.is_empty() || !self.hud_saytext.get() {
             return;
         }
 
         let engine = self.engine;
-        let now = state.time();
+        let now = hud.time();
         let saytext_time = self.hud_saytext_time.get();
         self.scroll_time = fminf(self.scroll_time, now + saytext_time);
         if self.scroll_time <= now {

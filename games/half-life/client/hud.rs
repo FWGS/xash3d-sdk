@@ -149,15 +149,15 @@ pub trait HudItem: Any {
         HudFlags::ACTIVE
     }
 
-    fn vid_init(&mut self, state: &State) {}
+    fn vid_init(&mut self, hud: &Hud) {}
 
-    fn init_hud_data(&mut self, state: &State) {}
+    fn init_hud_data(&mut self, hud: &Hud) {}
 
     fn reset(&mut self) {}
 
-    fn think(&mut self, state: &State) {}
+    fn think(&mut self, hud: &Hud) {}
 
-    fn draw(&mut self, state: &State) {}
+    fn draw(&mut self, hud: &Hud) {}
 }
 
 bitflags! {
@@ -183,7 +183,119 @@ pub struct PlayerInfoExtra {
     pub teamnumber: i16,
 }
 
-pub struct State {
+#[must_use]
+struct DrawNumber<'a> {
+    engine: ClientEngineRef,
+    digits: Ref<'a, DigitSprites>,
+    width: usize,
+    number: c_int,
+    color: RGB,
+    zero: bool,
+    string: bool,
+    reverse: bool,
+}
+
+impl DrawNumber<'_> {
+    fn width(mut self, width: usize) -> Self {
+        self.width = width;
+        self
+    }
+
+    // fn no_zero(mut self) -> Self {
+    //     self.zero = false;
+    //     self
+    // }
+
+    fn color(mut self, color: RGB) -> Self {
+        self.color = color;
+        self
+    }
+
+    fn string(mut self, string: bool) -> Self {
+        self.string = string;
+        self
+    }
+
+    fn reverse(mut self, reverse: bool) -> Self {
+        self.reverse = reverse;
+        self
+    }
+
+    fn at(self, x: c_int, y: c_int) -> c_int {
+        if self.number == 0 && !self.zero {
+            return x + self.digits.width() * self.width as c_int;
+        }
+
+        let mut buf = CStrArray::<64>::new();
+        write!(buf.cursor(), "{:1$}", self.number, self.width).ok();
+
+        let engine = self.engine;
+        if self.string {
+            if self.reverse {
+                return engine.draw_string_reverse(x, y, buf.as_c_str(), self.color);
+            } else {
+                return engine.draw_string(x, y, buf.as_c_str(), self.color);
+            }
+        }
+
+        if self.reverse {
+            todo!("draw number reverse is not implemented for sprites");
+        }
+
+        let mut x = x;
+        for c in buf.bytes() {
+            if let Some(digit) = self.digits.get_by_char(c as char) {
+                digit.draw_additive(0, x, y, self.color);
+            }
+            x += self.digits.width();
+        }
+        x
+    }
+}
+
+type RcCell<T> = Rc<RefCell<T>>;
+
+#[derive(Default)]
+pub struct Items {
+    items: Vec<(TypeId, RcCell<dyn HudItem>)>,
+}
+
+impl Items {
+    pub fn add<T: HudItem + 'static>(&mut self, value: T) -> &mut Self {
+        let id = value.type_id();
+        let item = Rc::new(RefCell::new(value));
+        match self.items.binary_search_by_key(&id, |(id, _)| *id) {
+            Ok(index) => self.items[index].1 = item,
+            Err(index) => self.items.insert(index, (id, item)),
+        }
+        self
+    }
+
+    pub fn find<T: Any>(&self) -> Option<&RcCell<T>> {
+        let id = TypeId::of::<T>();
+        match self.items.binary_search_by_key(&id, |(i, _)| *i) {
+            Ok(i) => {
+                let item = &self.items[i].1 as *const RcCell<dyn HudItem>;
+                Some(unsafe { &*(item as *const RcCell<T>) })
+            }
+            Err(_) => None,
+        }
+    }
+
+    pub fn get<T: Any>(&self) -> Ref<'_, T> {
+        self.find::<T>().unwrap().borrow()
+    }
+
+    pub fn get_mut<T: Any>(&self) -> RefMut<'_, T> {
+        self.find::<T>().unwrap().borrow_mut()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = RefMut<'_, dyn HudItem>> {
+        self.items.iter().map(|(_, i)| i.borrow_mut())
+    }
+}
+
+pub struct Hud {
     engine: ClientEngineRef,
 
     /// Is the game in an intermission/pause?
@@ -222,12 +334,47 @@ pub struct State {
 
     server_name: RefCell<CStrBox>,
     player_info_extra: RefCell<[Option<PlayerInfoExtra>; MAX_PLAYERS + 1]>,
+
+    items: Items,
+
+    #[allow(dead_code)]
+    text_message: TextMessage,
+
+    logo: Cell<bool>,
+    logo_hspr: Cell<Option<SpriteHandle>>,
+    old_hud_color: RefCell<String>,
+
+    zoom_sensitivity_ratio: Cvar,
+    default_fov: Cvar<u8>,
+    hud_draw: Cvar<bool>,
+    hud_color: Cvar<CStrThin>,
 }
 
-impl State {
-    fn new(engine: ClientEngineRef) -> Self {
+impl Hud {
+    pub fn new(engine: ClientEngineRef) -> Self {
+        hook_messages_and_commands(engine);
+
+        let mut items = Items::default();
+        items
+            .add(ammo::Ammo::new(engine))
+            .add(history::History::new(engine))
+            .add(weapon_menu::WeaponMenu::new(engine))
+            .add(health::Health::new(engine))
+            .add(battery::Battery::new(engine))
+            .add(flashlight::Flashlight::new(engine))
+            .add(geiger::Geiger::new(engine))
+            .add(train::Train::new(engine))
+            .add(death_notice::DeathNotice::new(engine))
+            .add(say_text::SayText::new(engine))
+            .add(menu::Menu::new(engine))
+            .add(message::HudMessage::new(engine))
+            .add(scoreboard::ScoreBoard::new(engine));
+
+        engine.register_cvar(c"cl_autowepswitch", c"1", cvar::ARCHIVE | cvar::USER_INFO);
+
         Self {
             engine,
+
             intermission: Cell::default(),
             time_old: Cell::default(),
             time: Cell::new(1.0),
@@ -246,27 +393,28 @@ impl State {
             digits: RefCell::new(DigitSprites::new()),
             server_name: RefCell::default(),
             player_info_extra: RefCell::new([None; MAX_PLAYERS + 1]),
+
+            items,
+
+            text_message: TextMessage::new(engine),
+
+            logo: Cell::default(),
+            logo_hspr: Cell::default(),
+            old_hud_color: RefCell::default(),
+
+            zoom_sensitivity_ratio: engine
+                .create_cvar(c"zoom_sensitivity_ratio", c"1.2", cvar::ARCHIVE)
+                .unwrap(),
+            default_fov: engine
+                .create_cvar(c"default_fov", c"90", cvar::ARCHIVE)
+                .unwrap(),
+            hud_draw: engine
+                .create_cvar(c"hud_draw", c"1", cvar::ARCHIVE)
+                .unwrap(),
+            hud_color: engine
+                .create_cvar(c"hud_color", c"", cvar::ARCHIVE)
+                .unwrap(),
         }
-    }
-
-    fn vid_init(&self) {
-        let engine = self.engine;
-        let screen_info = engine.screen_info();
-        let res = screen_info.sprite_resolution();
-        self.sprite_resolution.set(res);
-        let mut sprites = self.sprites.borrow_mut();
-        sprites.reload_from_file(res, c"sprites/hud.txt");
-        self.digits.replace(DigitSprites::from_sprites(&sprites));
-
-        let mut inv = self.inv.borrow_mut();
-        inv.vid_init();
-        if !engine.is_spectator_only() && !self.is_hidden(Hide::WEAPONS | Hide::ALL) {
-            inv.set_crosshair();
-        }
-    }
-
-    fn think(&self) {
-        self.inv.borrow_mut().think();
     }
 
     pub fn intermission(&self) -> bool {
@@ -307,10 +455,6 @@ impl State {
 
     pub fn angles(&self) -> vec3_t {
         self.angles.get()
-    }
-
-    pub fn fov(&self) -> u8 {
-        self.fov.get()
     }
 
     pub fn key_bits(&self) -> i32 {
@@ -364,7 +508,7 @@ impl State {
     fn draw_number(&self, number: c_int) -> DrawNumber<'_> {
         DrawNumber {
             engine: self.engine,
-            state: self,
+            digits: self.digits(),
             width: 0,
             color: self.color.get(),
             number,
@@ -403,200 +547,21 @@ impl State {
             _ => GREY,
         }
     }
-}
-
-#[must_use]
-struct DrawNumber<'a> {
-    engine: ClientEngineRef,
-    state: &'a State,
-    width: usize,
-    number: c_int,
-    color: RGB,
-    zero: bool,
-    string: bool,
-    reverse: bool,
-}
-
-impl DrawNumber<'_> {
-    fn width(mut self, width: usize) -> Self {
-        self.width = width;
-        self
-    }
-
-    // fn no_zero(mut self) -> Self {
-    //     self.zero = false;
-    //     self
-    // }
-
-    fn color(mut self, color: RGB) -> Self {
-        self.color = color;
-        self
-    }
-
-    fn string(mut self, string: bool) -> Self {
-        self.string = string;
-        self
-    }
-
-    fn reverse(mut self, reverse: bool) -> Self {
-        self.reverse = reverse;
-        self
-    }
-
-    fn at(self, x: c_int, y: c_int) -> c_int {
-        let digits = self.state.digits();
-        if self.number == 0 && !self.zero {
-            return x + digits.width() * self.width as c_int;
-        }
-
-        let mut buf = CStrArray::<64>::new();
-        write!(buf.cursor(), "{:1$}", self.number, self.width).ok();
-
-        let engine = self.engine;
-        if self.string {
-            if self.reverse {
-                return engine.draw_string_reverse(x, y, buf.as_c_str(), self.color);
-            } else {
-                return engine.draw_string(x, y, buf.as_c_str(), self.color);
-            }
-        }
-
-        if self.reverse {
-            todo!("draw number reverse is not implemented for sprites");
-        }
-
-        let mut x = x;
-        for c in buf.bytes() {
-            if let Some(digit) = digits.get_by_char(c as char) {
-                digit.draw_additive(0, x, y, self.color);
-            }
-            x += digits.width();
-        }
-        x
-    }
-}
-
-type RcCell<T> = Rc<RefCell<T>>;
-
-#[derive(Default)]
-pub struct Items {
-    items: Vec<(TypeId, RcCell<dyn HudItem>)>,
-}
-
-impl Items {
-    pub fn add<T: HudItem + 'static>(&mut self, value: T) -> &mut Self {
-        let id = value.type_id();
-        let item = Rc::new(RefCell::new(value));
-        match self.items.binary_search_by_key(&id, |(id, _)| *id) {
-            Ok(index) => self.items[index].1 = item,
-            Err(index) => self.items.insert(index, (id, item)),
-        }
-        self
-    }
-
-    pub fn find<T: Any>(&self) -> Option<&RcCell<T>> {
-        let id = TypeId::of::<T>();
-        match self.items.binary_search_by_key(&id, |(i, _)| *i) {
-            Ok(i) => {
-                let item = &self.items[i].1 as *const RcCell<dyn HudItem>;
-                Some(unsafe { &*(item as *const RcCell<T>) })
-            }
-            Err(_) => None,
-        }
-    }
-
-    pub fn get<T: Any>(&self) -> Ref<'_, T> {
-        self.find::<T>().unwrap().borrow()
-    }
-
-    pub fn get_mut<T: Any>(&self) -> RefMut<'_, T> {
-        self.find::<T>().unwrap().borrow_mut()
-    }
-
-    fn iter(&self) -> impl Iterator<Item = RefMut<'_, dyn HudItem>> {
-        self.items.iter().map(|(_, i)| i.borrow_mut())
-    }
-}
-
-pub struct Hud {
-    engine: ClientEngineRef,
-
-    pub state: State,
-    pub items: Items,
-
-    #[allow(dead_code)]
-    pub text_message: TextMessage,
-
-    logo: Cell<bool>,
-    logo_hspr: Cell<Option<SpriteHandle>>,
-    old_hud_color: RefCell<String>,
-
-    zoom_sensitivity_ratio: Cvar,
-    default_fov: Cvar<u8>,
-    hud_draw: Cvar<bool>,
-    hud_color: Cvar<CStrThin>,
-}
-
-impl Hud {
-    pub fn new(engine: ClientEngineRef) -> Self {
-        hook_messages_and_commands(engine);
-
-        let mut items = Items::default();
-        items
-            .add(ammo::Ammo::new(engine))
-            .add(history::History::new(engine))
-            .add(weapon_menu::WeaponMenu::new(engine))
-            .add(health::Health::new(engine))
-            .add(battery::Battery::new(engine))
-            .add(flashlight::Flashlight::new(engine))
-            .add(geiger::Geiger::new(engine))
-            .add(train::Train::new(engine))
-            .add(death_notice::DeathNotice::new(engine))
-            .add(say_text::SayText::new(engine))
-            .add(menu::Menu::new(engine))
-            .add(message::HudMessage::new(engine))
-            .add(scoreboard::ScoreBoard::new(engine));
-
-        engine.register_cvar(c"cl_autowepswitch", c"1", cvar::ARCHIVE | cvar::USER_INFO);
-
-        Self {
-            engine,
-
-            state: State::new(engine),
-            items,
-
-            text_message: TextMessage::new(engine),
-
-            logo: Cell::default(),
-            logo_hspr: Cell::default(),
-            old_hud_color: RefCell::default(),
-
-            zoom_sensitivity_ratio: engine
-                .create_cvar(c"zoom_sensitivity_ratio", c"1.2", cvar::ARCHIVE)
-                .unwrap(),
-            default_fov: engine
-                .create_cvar(c"default_fov", c"90", cvar::ARCHIVE)
-                .unwrap(),
-            hud_draw: engine
-                .create_cvar(c"hud_draw", c"1", cvar::ARCHIVE)
-                .unwrap(),
-            hud_color: engine
-                .create_cvar(c"hud_color", c"", cvar::ARCHIVE)
-                .unwrap(),
-        }
-    }
 
     pub fn get_sensitivity(&self) -> f32 {
-        self.state.mouse_sensitivity.get()
+        self.mouse_sensitivity.get()
+    }
+
+    pub fn fov(&self) -> u8 {
+        self.fov.get()
     }
 
     pub fn set_fov(&self, fov: u8) {
         let default_fov = self.default_fov.get();
-        self.state.fov.set(if fov == 0 { default_fov } else { fov });
+        self.fov.set(if fov == 0 { default_fov } else { fov });
 
-        self.state
-            .mouse_sensitivity
-            .set(if self.state.fov.get() != default_fov {
+        self.mouse_sensitivity
+            .set(if self.fov.get() != default_fov {
                 let zsr = self.zoom_sensitivity_ratio.get();
                 input().get_mouse_sensitivity() * (fov as f32 / default_fov as f32) * zsr
             } else {
@@ -606,15 +571,11 @@ impl Hud {
 
     pub fn last_fov(&self) -> u8 {
         // TODO: demo api
-        self.state.last_fov.get()
+        self.last_fov.get()
     }
 
     pub fn set_last_fov(&self, fov: u8) {
-        self.state.last_fov.set(fov);
-    }
-
-    pub fn fov(&self) -> u8 {
-        self.state.fov.get()
+        self.last_fov.set(fov);
     }
 
     pub fn score_info(&self, info: &user_message::ScoreInfo) {
@@ -627,7 +588,7 @@ impl Hud {
                 teamnumber: cmp::max(0, info.teamnumber),
             };
             self.items.get_mut::<ScoreBoard>().score_info(cl, &extra);
-            self.state.set_player_info_extra(index, Some(extra));
+            self.set_player_info_extra(index, Some(extra));
         }
     }
 
@@ -637,68 +598,86 @@ impl Hud {
         }
     }
 
+    fn state_vid_init(&self) {
+        let engine = self.engine;
+        let screen_info = engine.screen_info();
+        let res = screen_info.sprite_resolution();
+        self.sprite_resolution.set(res);
+        let mut sprites = self.sprites.borrow_mut();
+        sprites.reload_from_file(res, c"sprites/hud.txt");
+        self.digits.replace(DigitSprites::from_sprites(&sprites));
+
+        let mut inv = self.inv.borrow_mut();
+        inv.vid_init();
+        if !engine.is_spectator_only() && !self.is_hidden(Hide::WEAPONS | Hide::ALL) {
+            inv.set_crosshair();
+        }
+    }
+
     pub fn vid_init(&self) {
         self.logo_hspr.set(None);
 
-        self.state.vid_init();
+        self.state_vid_init();
 
         for mut i in self.items.iter() {
-            i.vid_init(&self.state);
+            i.vid_init(self);
         }
     }
 
     fn init_hud(&self) {
         for mut i in self.items.iter() {
-            i.init_hud_data(&self.state);
+            i.init_hud_data(self);
         }
 
         self.reset();
     }
 
     pub fn reset(&self) {
-        self.state.inv.borrow_mut().reset();
-        self.state.fov.set(90);
-        self.state.last_fov.set(self.default_fov.get());
+        self.inv.borrow_mut().reset();
+        self.fov.set(90);
+        self.last_fov.set(self.default_fov.get());
 
         for mut i in self.items.iter() {
             i.reset();
         }
     }
 
+    pub fn take_weapon_select(&self) -> u32 {
+        self.items.get_mut::<WeaponMenu>().take_weapon_select()
+    }
+
     fn think(&self) {
-        self.state.think();
+        self.inv.borrow_mut().think();
 
         for mut i in self.items.iter() {
-            i.think(&self.state);
+            i.think(self);
         }
 
         self.set_fov(self.last_fov());
-        if self.state.fov.get() == 0 {
-            self.state.fov.set(cmp::max(90, self.default_fov.get()));
+        if self.fov.get() == 0 {
+            self.fov.set(cmp::max(90, self.default_fov.get()));
         }
     }
 
     pub fn show_score(&self) -> bool {
-        self.items.get::<Health>().is_dead() || self.state.intermission()
+        self.items.get::<Health>().is_dead() || self.intermission()
     }
 
     pub fn update_client_data(&self, data: &mut client_data_s, _time: f32) -> bool {
-        self.state.origin.set(data.origin);
-        self.state.angles.set(data.viewangles);
+        self.origin.set(data.origin);
+        self.angles.set(data.viewangles);
 
         let show_score = self.show_score();
-        self.state
-            .set_key_bits(input().button_bits(false, show_score));
+        self.set_key_bits(input().button_bits(false, show_score));
 
-        self.state
-            .inventory_mut()
+        self.inventory_mut()
             .weapons_set(Weapons::from_bits_retain(data.iWeaponBits as u32));
 
         self.think();
 
         data.fov = self.fov() as f32;
 
-        input().reset_button_bits(self.state.key_bits(), show_score);
+        input().reset_button_bits(self.key_bits(), show_score);
 
         // data has been changed
         true
@@ -735,7 +714,7 @@ impl Hud {
         old_hud_color.push_str(s);
 
         if s.is_empty() {
-            self.state.set_color(DEFAULT_COLOR);
+            self.set_color(DEFAULT_COLOR);
             return;
         }
 
@@ -754,7 +733,7 @@ impl Hud {
                 DEFAULT_COLOR
             }),
         };
-        self.state.set_color(color);
+        self.set_color(color);
     }
 
     fn draw_logo(&self) {
@@ -772,7 +751,7 @@ impl Hud {
         let engine = self.engine;
         if self.logo_hspr.get().is_none() {
             self.logo_hspr
-                .set(try_spr_load(self.state.sprite_resolution(), |res| {
+                .set(try_spr_load(self.sprite_resolution(), |res| {
                     engine.spr_load(format_args!("sprites/{res}_logo.spr"))
                 }));
         }
@@ -784,32 +763,32 @@ impl Hud {
         let (w, h) = hspr.size(0);
         let x = info.width() - w;
         let y = h / 2;
-        let frame = (self.state.time() * 20.0) as usize % MAX_LOGO_FRAMES;
+        let frame = (self.time() * 20.0) as usize % MAX_LOGO_FRAMES;
         let i = LOGO_FRAME[frame] - 1;
         hspr.draw_additive(i, x, y, RGB::splat(250));
     }
 
     pub fn draw(&self, time: f32, intermission: bool) -> bool {
-        let time_old = self.state.time.replace(time);
-        self.state.time_old.set(time_old);
+        let time_old = self.time.replace(time);
+        self.time_old.set(time_old);
         let mut time_delta = time as f64 - time_old as f64;
         if time_delta < 0.0 {
             time_delta = 0.0;
         }
-        self.state.time_delta.set(time_delta);
+        self.time_delta.set(time_delta);
 
-        self.state.intermission.set(intermission);
+        self.intermission.set(intermission);
 
         if self.hud_draw.get() {
             self.update_hud_color();
             for mut i in self.items.iter() {
                 let flags = i.flags();
                 if !intermission {
-                    if flags.contains(HudFlags::ACTIVE) && !self.state.is_hidden(Hide::ALL) {
-                        i.draw(&self.state);
+                    if flags.contains(HudFlags::ACTIVE) && !self.is_hidden(Hide::ALL) {
+                        i.draw(self);
                     }
                 } else if flags.contains(HudFlags::INTERMISSION) {
-                    i.draw(&self.state);
+                    i.draw(self);
                 }
             }
         }
@@ -887,7 +866,7 @@ fn hook_messages_and_commands(engine: ClientEngineRef) {
 
     hook_user_message!(engine, ServerName, |_, msg| {
         let msg = msg.read::<user_message::ServerName>()?;
-        hud().state.set_server_name(msg.name);
+        hud().set_server_name(msg.name);
         Ok(())
     });
 
@@ -906,9 +885,7 @@ fn hook_messages_and_commands(engine: ClientEngineRef) {
         if menu.is_displayed() {
             menu.select_menu_item(slot);
         } else {
-            hud.items
-                .get_mut::<WeaponMenu>()
-                .select_slot(&hud.state, slot);
+            hud.items.get_mut::<WeaponMenu>().select_slot(&hud, slot);
         }
     }
 

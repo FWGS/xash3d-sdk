@@ -11,7 +11,7 @@ use xash3d_client::{
 use crate::{
     export::hud,
     hud::{
-        Hide, HudItem, Sprite, State,
+        Hide, Hud, HudItem, Sprite,
         inventory::{MAX_WEAPON_POSITIONS, MAX_WEAPON_SLOTS, Weapon},
     },
 };
@@ -49,15 +49,11 @@ impl WeaponMenu {
         });
         hook_command!(engine, c"invnext", |_| {
             let hud = hud();
-            hud.items
-                .get_mut::<WeaponMenu>()
-                .cmd_next_weapon(&hud.state);
+            hud.items.get_mut::<WeaponMenu>().cmd_next_weapon(&hud);
         });
         hook_command!(engine, c"invprev", |_| {
             let hud = hud();
-            hud.items
-                .get_mut::<WeaponMenu>()
-                .cmd_prev_weapon(&hud.state);
+            hud.items.get_mut::<WeaponMenu>().cmd_prev_weapon(&hud);
         });
 
         Self {
@@ -80,12 +76,12 @@ impl WeaponMenu {
         mem::take(&mut self.weapon_select)
     }
 
-    pub fn select_slot(&mut self, state: &State, slot: u32) {
+    pub fn select_slot(&mut self, hud: &Hud, slot: u32) {
         if slot == 0 || slot > MAX_WEAPON_SLOTS as u32 {
             return;
         }
 
-        if state.is_hidden(Hide::WEAPONS | Hide::ALL) || !state.has_suit() {
+        if hud.is_hidden(Hide::WEAPONS | Hide::ALL) || !hud.has_suit() {
             return;
         }
 
@@ -95,7 +91,7 @@ impl WeaponMenu {
         let slot = slot - 1;
         let mut selected = None;
 
-        let inv = state.inventory();
+        let inv = hud.inventory();
         match self.active {
             Select::Weapon(_, s, p) if s == slot => {
                 engine.play_sound_by_name(c"common/wpn_moveselect.wav", 1.0);
@@ -147,12 +143,12 @@ impl WeaponMenu {
         }
     }
 
-    fn cmd_next_weapon(&mut self, state: &State) {
-        if state.is_hidden(Hide::WEAPONS | Hide::ALL) {
+    fn cmd_next_weapon(&mut self, hud: &Hud) {
+        if hud.is_hidden(Hide::WEAPONS | Hide::ALL) {
             return;
         }
 
-        let inv = state.inventory();
+        let inv = hud.inventory();
         if matches!(self.active, Select::None | Select::Menu) {
             if let Some(weapon) = inv.current() {
                 self.active = weapon.into();
@@ -185,12 +181,12 @@ impl WeaponMenu {
         self.active = Select::None;
     }
 
-    fn cmd_prev_weapon(&mut self, state: &State) {
-        if state.is_hidden(Hide::WEAPONS | Hide::ALL) {
+    fn cmd_prev_weapon(&mut self, hud: &Hud) {
+        if hud.is_hidden(Hide::WEAPONS | Hide::ALL) {
             return;
         }
 
-        let inv = state.inventory();
+        let inv = hud.inventory();
         if matches!(self.active, Select::None | Select::Menu) {
             if let Some(weapon) = inv.current() {
                 self.active = weapon.into();
@@ -239,29 +235,29 @@ impl WeaponMenu {
         x + width
     }
 
-    fn draw_ammo_bar(&self, state: &State, weapon: &Weapon, x: c_int, y: c_int) {
+    fn draw_ammo_bar(&self, hud: &Hud, weapon: &Weapon, x: c_int, y: c_int) {
         if let Some(ammo) = weapon.ammo[0] {
-            let inv = state.inventory();
+            let inv = hud.inventory();
             let count = inv.ammo_count(ammo.ty);
             if count == 0 {
                 return;
             }
             let f = count as f32 / ammo.max as f32;
-            let x = self.draw_bar(x, y, state.color(), f);
+            let x = self.draw_bar(x, y, hud.color(), f);
 
             if let Some(ammo) = weapon.ammo[1] {
                 let count = inv.ammo_count(ammo.ty);
                 let f = count as f32 / ammo.max as f32;
-                self.draw_bar(x + 5, y, state.color(), f);
+                self.draw_bar(x + 5, y, hud.color(), f);
             }
         }
     }
 }
 
 impl HudItem for WeaponMenu {
-    fn vid_init(&mut self, state: &State) {
-        self.bucket0 = state.find_sprite_index(c"bucket1");
-        self.selection = state.find_sprite(c"selection");
+    fn vid_init(&mut self, hud: &Hud) {
+        self.bucket0 = hud.find_sprite_index(c"bucket1");
+        self.selection = hud.find_sprite(c"selection");
 
         let engine = self.engine;
         let screen = engine.screen_info();
@@ -278,12 +274,12 @@ impl HudItem for WeaponMenu {
         self.engine.unset_crosshair();
     }
 
-    fn think(&mut self, state: &State) {
-        if self.active != Select::None && state.key_bits() & consts::IN_ATTACK != 0 {
+    fn think(&mut self, hud: &Hud) {
+        if self.active != Select::None && hud.key_bits() & consts::IN_ATTACK != 0 {
             let engine = self.engine;
 
             if let Select::Weapon(id, _, _) = self.active {
-                let inv = state.inventory();
+                let inv = hud.inventory();
                 if let Some(weapon) = inv.weapon(id) {
                     engine.server_cmd(&weapon.name);
                     self.weapon_select = weapon.id;
@@ -293,14 +289,14 @@ impl HudItem for WeaponMenu {
             self.last = self.active;
             self.active = Select::None;
 
-            state.with_key_bits(|bits| bits & !consts::IN_ATTACK);
+            hud.with_key_bits(|bits| bits & !consts::IN_ATTACK);
 
             engine.play_sound_by_name(c"common/wpn_select.wav", 1.0);
         }
     }
 
-    fn draw(&mut self, state: &State) {
-        if !state.has_suit() || state.is_hidden(Hide::WEAPONS | Hide::ALL) {
+    fn draw(&mut self, hud: &Hud) {
+        if !hud.has_suit() || hud.is_hidden(Hide::WEAPONS | Hide::ALL) {
             return;
         }
 
@@ -311,7 +307,7 @@ impl HudItem for WeaponMenu {
         };
 
         let engine = self.engine;
-        let inv = state.inventory();
+        let inv = hud.inventory();
         let mut x = 10;
         let y = 10;
         for slot in 0..MAX_WEAPON_SLOTS as u32 {
@@ -320,10 +316,10 @@ impl HudItem for WeaponMenu {
                 _ => 192,
             };
 
-            let color = state.color().scale_color(a);
+            let color = hud.color().scale_color(a);
 
             if let Some(index) = self.bucket0 {
-                let sprite = state.sprites()[index + slot as usize];
+                let sprite = hud.sprites()[index + slot as usize];
                 let width = match active_slot {
                     Some(s) if s == slot => inv
                         .get_first_pos(s)
@@ -340,7 +336,7 @@ impl HudItem for WeaponMenu {
         let mut x = 10;
 
         let (bucket_width, bucket_height) = match self.bucket0 {
-            Some(index) => state.sprites()[index].size(),
+            Some(index) => hud.sprites()[index].size(),
             None => (0, 0),
         };
 
@@ -358,7 +354,7 @@ impl HudItem for WeaponMenu {
                         continue;
                     };
 
-                    let color = state.color();
+                    let color = hud.color();
 
                     if matches!(self.active, Select::Weapon(id, ..) if id == weapon.id) {
                         if let Some(sprite) = weapon.active {
@@ -378,7 +374,7 @@ impl HudItem for WeaponMenu {
                         sprite.draw_additive(0, x, y, color);
                     }
 
-                    self.draw_ammo_bar(state, weapon, x + self.ab_width / 2, y);
+                    self.draw_ammo_bar(hud, weapon, x + self.ab_width / 2, y);
 
                     y += weapon.active.unwrap().height() + 5;
                 }
@@ -391,7 +387,7 @@ impl HudItem for WeaponMenu {
                     };
 
                     let color = if inv.has_ammo(weapon) {
-                        state.color().rgba(128)
+                        hud.color().rgba(128)
                     } else {
                         RGB::REDISH.rgba(96)
                     };

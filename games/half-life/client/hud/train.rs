@@ -5,7 +5,7 @@ use xash3d_hl_shared::user_message;
 
 use crate::{
     export::hud,
-    hud::{HudItem, State, try_spr_load},
+    hud::{Hud, HudItem, try_spr_load},
 };
 
 pub struct Train {
@@ -35,14 +35,14 @@ impl Train {
 }
 
 impl HudItem for Train {
-    fn draw(&mut self, state: &State) {
+    fn draw(&mut self, hud: &Hud) {
         if self.pos == 0 {
             return;
         }
 
         let engine = self.engine;
         if self.sprite.is_none() {
-            self.sprite = try_spr_load(state.sprite_resolution(), |res| {
+            self.sprite = try_spr_load(hud.sprite_resolution(), |res| {
                 engine.spr_load(format_args!("sprites/{res}_train.spr"))
             });
         }
@@ -51,7 +51,7 @@ impl HudItem for Train {
         let (w, h) = sprite.size(0);
         let screen = engine.screen_info();
         let x = screen.width() / 3 + w / 4;
-        let y = screen.height() - h - state.digits().height();
-        sprite.draw_additive(self.pos as c_int - 1, x, y, state.color());
+        let y = screen.height() - h - hud.digits().height();
+        sprite.draw_additive(self.pos as c_int - 1, x, y, hud.color());
     }
 }

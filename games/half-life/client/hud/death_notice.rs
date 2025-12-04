@@ -16,7 +16,7 @@ use xash3d_hl_shared::user_message;
 
 use crate::{
     export::hud,
-    hud::{HudItem, MAX_PLAYER_NAME_LENGTH, Sprite, State},
+    hud::{Hud, HudItem, MAX_PLAYER_NAME_LENGTH, Sprite},
 };
 
 const MAX_DEATH_NOTICES: usize = 4;
@@ -87,7 +87,7 @@ impl DeathNotice {
         hook_user_message!(engine, DeathMsg, |_, msg| {
             let msg = msg.read::<user_message::DeathMsg>()?;
             let hud = hud();
-            hud.items.get_mut::<DeathNotice>().death(&hud.state, &msg);
+            hud.items.get_mut::<DeathNotice>().death(&hud, &msg);
             Ok(())
         });
 
@@ -102,7 +102,7 @@ impl DeathNotice {
         }
     }
 
-    fn death(&mut self, state: &State, msg: &user_message::DeathMsg) {
+    fn death(&mut self, hud: &Hud, msg: &user_message::DeathMsg) {
         let killer_id = msg.killer;
         let victim_id = msg.victim;
         let killed_with: &CStrThin = msg.killed_with.into();
@@ -114,7 +114,7 @@ impl DeathNotice {
 
         let killer = if !suicide {
             engine.get_player_info(killer_id as c_int).map(|info| {
-                let color = state.get_client_color(killer_id as c_int);
+                let color = hud.get_client_color(killer_id as c_int);
                 Player::new(info.name(), color)
             })
         } else {
@@ -125,7 +125,7 @@ impl DeathNotice {
         let victim = if player_kill {
             let info = engine.get_player_info(victim_id as c_int);
             let name = info.as_ref().map_or(c"unknown".into(), |info| info.name());
-            let color = state.get_client_color(victim_id as c_int);
+            let color = hud.get_client_color(victim_id as c_int);
             Victim::Player(Player::new(name, color))
         } else {
             Victim::Object {
@@ -136,10 +136,10 @@ impl DeathNotice {
         let weapon = {
             let mut buf = CStrArray::<128>::new();
             write!(buf.cursor(), "d_{killed_with}").ok();
-            state.find_sprite(buf)
+            hud.find_sprite(buf)
         };
 
-        let display_time = state.time() + self.hud_deathnotice_time.get();
+        let display_time = hud.time() + self.hud_deathnotice_time.get();
 
         match victim {
             Victim::Player(victim) => {
@@ -197,20 +197,20 @@ impl DeathNotice {
 }
 
 impl HudItem for DeathNotice {
-    fn vid_init(&mut self, state: &State) {
+    fn vid_init(&mut self, hud: &Hud) {
         self.list.clear();
-        self.skull = state.find_sprite(c"d_skull");
+        self.skull = hud.find_sprite(c"d_skull");
     }
 
-    fn init_hud_data(&mut self, _: &State) {
+    fn init_hud_data(&mut self, _: &Hud) {
         self.list.clear();
     }
 
-    fn draw(&mut self, state: &State) {
+    fn draw(&mut self, hud: &Hud) {
         // TODO: exit if !viewport.allowed_to_print_text()
 
         while let Some(i) = self.list.front() {
-            if i.display_time >= state.time() {
+            if i.display_time >= hud.time() {
                 break;
             }
             self.list.pop_front();

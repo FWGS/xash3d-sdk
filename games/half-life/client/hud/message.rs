@@ -14,9 +14,10 @@ use xash3d_client::{
 };
 use xash3d_hl_shared::user_message;
 
-use crate::export::hud;
-
-use super::{HudFlags, HudItem, Sprite, State};
+use crate::{
+    export::hud,
+    hud::{Hud, HudFlags, HudItem, Sprite},
+};
 
 const MAX_HUD_MESSAGES: usize = 16;
 
@@ -53,7 +54,7 @@ impl Msg {
         }
     }
 
-    fn draw(&self, state: &State, engine: &ClientEngine, screen: &ScreenInfo) {
+    fn draw(&self, hud: &Hud, engine: &ClientEngine, screen: &ScreenInfo) {
         // TODO: utf8
 
         let mut length = 0;
@@ -71,7 +72,7 @@ impl Msg {
             total_height += screen.char_height();
         }
 
-        let time = state.time() - self.start_time;
+        let time = hud.time() - self.start_time;
         let fade_time;
         let mut fade_blend = 0.0;
         let mut char_time = 0.0;
@@ -178,15 +179,13 @@ impl HudMessage {
                 .to_str()
                 .map_err(|_| UserMessageError::InvalidUtf8String)?;
             let hud = hud();
-            hud.items
-                .get_mut::<HudMessage>()
-                .msg_hud_text(&hud.state, s);
+            hud.items.get_mut::<HudMessage>().msg_hud_text(&hud, s);
             Ok(())
         });
 
         hook_user_message!(engine, GameTitle, {
             let hud = hud();
-            hud.items.get_mut::<HudMessage>().msg_game_title(&hud.state);
+            hud.items.get_mut::<HudMessage>().msg_game_title(&hud);
             true
         });
 
@@ -206,21 +205,21 @@ impl HudMessage {
         }
     }
 
-    fn msg_hud_text(&mut self, state: &State, s: &str) {
+    fn msg_hud_text(&mut self, hud: &Hud, s: &str) {
         if s == "END3" {
             self.end_after_message = true;
         }
-        let now = state.time();
+        let now = hud.time();
         self.message_add(s, now);
         // save time to fixup level transitions
         self.fixup_time = now;
         self.active = true;
     }
 
-    fn msg_game_title(&mut self, state: &State) {
+    fn msg_game_title(&mut self, hud: &Hud) {
         self.game_title = self.engine.text_message_get(c"GAMETITLE");
         if self.game_title.is_some() {
-            self.game_title_time = state.time();
+            self.game_title_time = hud.time();
             self.active = true;
         }
     }
@@ -288,7 +287,7 @@ impl HudMessage {
         self.messages[index] = Some(new);
     }
 
-    fn draw_game_title(&mut self, state: &State) -> bool {
+    fn draw_game_title(&mut self, hud: &Hud) -> bool {
         let Some(title) = self.game_title else {
             return false;
         };
@@ -299,7 +298,7 @@ impl HudMessage {
             return false;
         };
 
-        let now = state.time();
+        let now = hud.time();
         if self.game_title_time > now {
             self.game_title_time = now;
         }
@@ -326,8 +325,8 @@ impl HudMessage {
         true
     }
 
-    fn draw_messages(&mut self, state: &State) -> bool {
-        let now = state.time();
+    fn draw_messages(&mut self, hud: &Hud) -> bool {
+        let now = hud.time();
         for i in self.messages.iter_mut().filter_map(|i| i.as_mut()) {
             if i.start_time > now {
                 i.start_time = now + self.fixup_time - i.start_time + 0.2;
@@ -340,7 +339,7 @@ impl HudMessage {
         for i in self.messages.iter_mut() {
             if let Some(msg) = i {
                 if now <= msg.end_time() {
-                    msg.draw(state, &engine, &screen);
+                    msg.draw(hud, &engine, &screen);
                     drawn = true;
                 } else {
                     *i = None;
@@ -375,13 +374,13 @@ impl HudItem for HudMessage {
         self.messages.fill(None);
     }
 
-    fn vid_init(&mut self, state: &State) {
-        self.title_half = state.find_sprite(c"title_half");
-        self.title_life = state.find_sprite(c"title_life");
+    fn vid_init(&mut self, hud: &Hud) {
+        self.title_half = hud.find_sprite(c"title_half");
+        self.title_life = hud.find_sprite(c"title_life");
     }
 
-    fn draw(&mut self, state: &State) {
-        if !self.draw_game_title(state) && !self.draw_messages(state) {
+    fn draw(&mut self, hud: &Hud) {
+        if !self.draw_game_title(hud) && !self.draw_messages(hud) {
             self.active = false;
         }
     }

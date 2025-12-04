@@ -2,7 +2,7 @@ use core::ffi::c_int;
 
 use xash3d_client::prelude::*;
 
-use crate::hud::{Fade, Hide, HudItem, State};
+use crate::hud::{Fade, Hide, Hud, HudItem};
 
 const FALLBACK_WIDTH: c_int = 24;
 
@@ -29,12 +29,12 @@ impl HudItem for Ammo {
         self.fade.stop();
     }
 
-    fn draw(&mut self, state: &State) {
-        if !state.has_suit() || state.is_hidden(Hide::WEAPONS) {
+    fn draw(&mut self, hud: &Hud) {
+        if !hud.has_suit() || hud.is_hidden(Hide::WEAPONS) {
             return;
         }
 
-        let inv = state.inventory();
+        let inv = hud.inventory();
         let Some(weapon) = inv.current() else {
             return;
         };
@@ -43,12 +43,12 @@ impl HudItem for Ammo {
             return;
         }
 
-        let a = self.fade.alpha(state.time_delta());
-        let color = state.color().scale_color(a);
+        let a = self.fade.alpha(hud.time_delta());
+        let color = hud.color().scale_color(a);
 
         let engine = self.engine;
         let screen = engine.screen_info();
-        let digits = state.digits();
+        let digits = hud.digits();
         let ammo_width = digits.width();
 
         let mut y = screen.height() - digits.height() - digits.height() / 2;
@@ -61,21 +61,17 @@ impl HudItem for Ammo {
             let mut x = screen.width() - icon_width;
             if weapon.clip >= 0 {
                 x -= 8 * ammo_width;
-                x = state
-                    .draw_number(weapon.clip)
-                    .width(3)
-                    .color(color)
-                    .at(x, y);
+                x = hud.draw_number(weapon.clip).width(3).color(color).at(x, y);
 
                 let bar_width = ammo_width / 10;
                 x += ammo_width / 2;
-                engine.fill_rgba(x, y, bar_width, digits.height(), state.color().rgba(a));
+                engine.fill_rgba(x, y, bar_width, digits.height(), hud.color().rgba(a));
 
                 x += ammo_width / 2 + bar_width;
-                x = state.draw_number(ammo_count).width(3).color(color).at(x, y);
+                x = hud.draw_number(ammo_count).width(3).color(color).at(x, y);
             } else {
                 x -= 4 * ammo_width;
-                x = state.draw_number(ammo_count).width(3).color(color).at(x, y);
+                x = hud.draw_number(ammo_count).width(3).color(color).at(x, y);
             }
 
             if let Some(icon) = ammo.icon {
@@ -93,7 +89,7 @@ impl HudItem for Ammo {
                 y -= digits.height() + digits.height() / 4;
 
                 x -= 4 * ammo_width;
-                x = state.draw_number(ammo_count).width(3).color(color).at(x, y);
+                x = hud.draw_number(ammo_count).width(3).color(color).at(x, y);
 
                 if let Some(icon) = ammo.icon {
                     let offset = icon.height() / 8;
