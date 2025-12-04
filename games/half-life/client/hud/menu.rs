@@ -8,9 +8,10 @@ use xash3d_client::{
     user_message::{UserMessageBuffer, UserMessageError, hook_user_message},
 };
 
-use crate::export::hud;
-
-use super::{HudItem, State};
+use crate::{
+    export::hud,
+    hud::{Hud, HudItem},
+};
 
 const MAX_MENU_STRING: usize = 512;
 
@@ -39,7 +40,7 @@ impl Menu {
         self.time != 0.0
     }
 
-    fn show_menu(&mut self, state: &State, slots: u16, time: u8, more: bool, data: &str) {
+    fn show_menu(&mut self, hud: &Hud, slots: u16, time: u8, more: bool, data: &str) {
         if slots == 0 {
             self.waiting_more = false;
             return;
@@ -60,7 +61,7 @@ impl Menu {
         self.data = buf;
 
         self.time = if time > 0 {
-            state.time() + time as f32
+            hud.time() + time as f32
         } else {
             0.0
         };
@@ -88,18 +89,18 @@ impl Menu {
         let hud = hud();
         hud.items
             .get_mut::<Menu>()
-            .show_menu(&hud.state, slots, time, more, data);
+            .show_menu(&hud, slots, time, more, data);
         Ok(())
     }
 }
 
 impl HudItem for Menu {
-    fn draw(&mut self, state: &State) {
+    fn draw(&mut self, hud: &Hud) {
         // TODO: do not draw if score board is visible
 
         if self.time == 0.0 {
             return;
-        } else if self.time <= state.time() {
+        } else if self.time <= hud.time() {
             self.time = 0.0;
             return;
         }

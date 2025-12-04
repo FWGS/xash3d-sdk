@@ -22,7 +22,6 @@ use xash3d_client::{
 use crate::{
     export::{hud, input, view},
     helpers,
-    hud::weapon_menu::WeaponMenu,
 };
 
 const MOUSE_BUTTON_COUNT: c_int = 5;
@@ -574,7 +573,7 @@ impl Input {
             view().stop_pitch_drift();
         }
 
-        if !self.mouse_in_use.get() && !hud().state.intermission() && !self.mouse_visible {
+        if !self.mouse_in_use.get() && !hud().intermission() && !self.mouse_visible {
             let (dx, dy) = self.get_relative_mouse_pos();
 
             let mx = dx + self.mx_accum;
@@ -745,7 +744,7 @@ impl Input {
 
         cmd.impulse = self.in_impulse.take();
 
-        cmd.weaponselect = hud().items.get_mut::<WeaponMenu>().take_weapon_select() as u8;
+        cmd.weaponselect = hud().take_weapon_select() as u8;
 
         let show_score = hud().show_score();
         cmd.buttons = self.button_bits(true, show_score) as u16;

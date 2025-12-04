@@ -196,7 +196,7 @@ impl Inventory {
         hook_user_message!(engine, WeaponList, |engine, msg| {
             match Weapon::read_from_message(engine, msg) {
                 Ok(weapon) => {
-                    hud().state.inventory_mut().weapon_add(weapon);
+                    hud().inventory_mut().weapon_add(weapon);
                     true
                 }
                 Err(_) => {
@@ -209,7 +209,6 @@ impl Inventory {
         hook_user_message!(engine, AmmoX, |_, msg| {
             let msg = msg.read::<user_message::AmmoX>()?;
             hud()
-                .state
                 .inventory_mut()
                 .ammo_set(msg.ty.into(), msg.count.into());
             Ok(())
@@ -227,14 +226,14 @@ impl Inventory {
 
             let msg = msg.read::<user_message::HideWeapon>()?;
             let hud = hud();
-            hud.state.set_hide(Hide::from_bits_retain(msg.hide as u32));
+            hud.set_hide(Hide::from_bits_retain(msg.hide as u32));
 
             if !engine.is_spectator_only() {
-                if hud.state.is_hidden(Hide::WEAPONS | Hide::ALL) {
+                if hud.is_hidden(Hide::WEAPONS | Hide::ALL) {
                     hud.items.get_mut::<WeaponMenu>().close();
                     engine.unset_crosshair();
                 } else {
-                    hud.state.inventory_mut().set_crosshair();
+                    hud.inventory_mut().set_crosshair();
                 }
             }
 
@@ -429,7 +428,7 @@ impl Inventory {
         // TODO: if g_iUser1 != OBS_IN_EYE
 
         let hud = hud();
-        let mut weapons = hud.state.inventory_mut();
+        let mut weapons = hud.inventory_mut();
         let Some(weapon) = &mut weapons.list[id as usize] else {
             return false;
         };
@@ -447,7 +446,7 @@ impl Inventory {
 
         hud.items.get_mut::<super::ammo::Ammo>().fade_start();
 
-        let (autoaim, crosshair) = if hud.state.fov() >= 90 {
+        let (autoaim, crosshair) = if hud.fov() >= 90 {
             (weapon.autoaim, weapon.crosshair)
         } else {
             (weapon.zoomed_autoaim, weapon.zoomed_crosshair)
