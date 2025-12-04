@@ -66,12 +66,6 @@ impl_global_getter!(Hud, hud);
 impl_global_getter!(Weapons, weapons);
 impl_global_getter!(StudioRenderer, renderer);
 
-impl Drop for Dll {
-    fn drop(&mut self) {
-        self.input.borrow_mut().shutdown();
-    }
-}
-
 impl ClientDll for Dll {
     fn new(engine: ClientEngineRef) -> Self {
         Self {
@@ -129,7 +123,10 @@ impl ClientDll for Dll {
     }
 
     fn create_move(&self, frame_time: f32, active: bool) -> usercmd_s {
-        self.input.borrow_mut().create_move(frame_time, active)
+        let hud = self.hud.borrow();
+        let view = self.view.borrow();
+        let mut input = self.input.borrow_mut();
+        input.create_move(&hud, &view, frame_time, active)
     }
 
     fn post_run_cmd(
@@ -167,6 +164,7 @@ impl ClientDll for Dll {
             .borrow()
             .keys
             .find(name)
+            .map(|i| i.as_ptr())
             .unwrap_or(ptr::null_mut())
     }
 

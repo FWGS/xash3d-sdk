@@ -4,16 +4,16 @@ use core::{
     mem,
 };
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
 use xash3d_client::{
     consts::{self, PITCH, ROLL, YAW},
-    csz::{CStrBox, CStrThin},
+    csz::CStrThin,
     cvar::{self, Cvar},
     ffi::{
-        common::{kbutton_t, usercmd_s, vec3_t},
+        common::{usercmd_s, vec3_t},
         keys,
     },
-    input::{KeyButton, KeyState},
+    input::{KeyButton, KeyButtonData, KeyState},
     macros::{hook_command, hook_command_key},
     math::{angle_mod, pow, sqrt, sqrtf},
     prelude::*,
@@ -22,7 +22,8 @@ use xash3d_client::{
 use crate::{
     export::{hud, input, view},
     helpers,
-    hud::weapon_menu::WeaponMenu,
+    hud::Hud,
+    view::View,
 };
 
 const MOUSE_BUTTON_COUNT: c_int = 5;
@@ -36,38 +37,69 @@ impl Mouse {
 }
 
 struct Key {
-    name: CStrBox,
-    kb: *mut kbutton_t,
+    name: &'static CStrThin,
+    kb: KeyButton,
 }
 
 pub struct KeyList {
+    engine: ClientEngineRef,
     list: Vec<Key>,
 }
 
 impl KeyList {
-    fn new() -> Self {
-        Self { list: Vec::new() }
-    }
-
-    pub fn find(&self, name: &CStrThin) -> Option<*mut kbutton_t> {
-        self.list.iter().find(|i| i.name == *name).map(|i| i.kb)
-    }
-
-    fn add(&mut self, name: &CStr, kb: *mut kbutton_t) {
-        if self.find(name.into()).is_some() {
-            return;
+    fn new(engine: ClientEngineRef) -> Self {
+        Self {
+            engine,
+            list: Vec::new(),
         }
+    }
 
+    pub fn find(&self, name: impl AsRef<CStrThin>) -> Option<KeyButton> {
+        self.list
+            .iter()
+            .find(|i| i.name == name.as_ref())
+            .map(|i| i.kb)
+    }
+
+    fn add(&mut self, name: &'static CStr, data: &'static KeyButtonData) -> KeyButton {
+        if self.find(name).is_some() {
+            panic!("the key button {name:?} has already been added");
+        }
+        let kb = KeyButton::new(self.engine, data);
         self.list.push(Key {
             name: name.into(),
             kb,
-        })
-    }
-
-    fn clear(&mut self) {
-        self.list.clear();
+        });
+        kb
     }
 }
+
+static IN_GRAPH: KeyButtonData = KeyButtonData::new();
+static IN_MLOOK: KeyButtonData = KeyButtonData::new();
+static IN_JLOOK: KeyButtonData = KeyButtonData::new();
+static IN_KLOOK: KeyButtonData = KeyButtonData::new();
+static IN_LEFT: KeyButtonData = KeyButtonData::with_bits(consts::IN_LEFT as u32);
+static IN_RIGHT: KeyButtonData = KeyButtonData::with_bits(consts::IN_RIGHT as u32);
+static IN_FORWARD: KeyButtonData = KeyButtonData::with_bits(consts::IN_FORWARD as u32);
+static IN_BACK: KeyButtonData = KeyButtonData::with_bits(consts::IN_BACK as u32);
+static IN_LOOKUP: KeyButtonData = KeyButtonData::new();
+static IN_LOOKDOWN: KeyButtonData = KeyButtonData::new();
+static IN_MOVELEFT: KeyButtonData = KeyButtonData::with_bits(consts::IN_MOVELEFT as u32);
+static IN_MOVERIGHT: KeyButtonData = KeyButtonData::with_bits(consts::IN_MOVERIGHT as u32);
+static IN_STRAFE: KeyButtonData = KeyButtonData::new();
+static IN_SPEED: KeyButtonData = KeyButtonData::new();
+static IN_USE: KeyButtonData = KeyButtonData::with_bits(consts::IN_USE as u32);
+static IN_JUMP: KeyButtonData = KeyButtonData::with_bits(consts::IN_JUMP as u32);
+static IN_ATTACK: KeyButtonData = KeyButtonData::with_bits(consts::IN_ATTACK as u32);
+static IN_ATTACK2: KeyButtonData = KeyButtonData::with_bits(consts::IN_ATTACK2 as u32);
+static IN_UP: KeyButtonData = KeyButtonData::new();
+static IN_DOWN: KeyButtonData = KeyButtonData::new();
+static IN_DUCK: KeyButtonData = KeyButtonData::with_bits(consts::IN_DUCK as u32);
+static IN_RUN: KeyButtonData = KeyButtonData::with_bits(consts::IN_RUN as u32);
+static IN_RELOAD: KeyButtonData = KeyButtonData::with_bits(consts::IN_RELOAD as u32);
+static IN_ALT1: KeyButtonData = KeyButtonData::with_bits(consts::IN_ALT1 as u32);
+static IN_SCORE: KeyButtonData = KeyButtonData::with_bits(consts::IN_SCORE as u32);
+static IN_BREAK: KeyButtonData = KeyButtonData::new();
 
 pub struct Input {
     engine: ClientEngineRef,
@@ -95,9 +127,9 @@ pub struct Input {
     mouse_x: f32,
     mouse_y: f32,
 
-    in_graph: Box<KeyButton>,
-    in_mlook: Box<KeyButton>,
-    in_jlook: Box<KeyButton>,
+    in_graph: KeyButton,
+    in_mlook: KeyButton,
+    in_jlook: KeyButton,
     in_klook: KeyButton,
     in_left: KeyButton,
     in_right: KeyButton,
@@ -116,6 +148,7 @@ pub struct Input {
     in_up: KeyButton,
     in_down: KeyButton,
     in_duck: KeyButton,
+    in_run: KeyButton,
     in_reload: KeyButton,
     in_alt1: KeyButton,
     in_score: KeyButton,
@@ -172,13 +205,13 @@ impl Input {
         hook_command_key!(engine, "klook", input().in_klook);
         hook_command_key!(engine, "mlook", input().in_mlook, up {
             let input = input();
-            let state = input.in_mlook.state();
-            if !state.contains(KeyState::DOWN) && input.lookspring.get() {
+            if !input.in_mlook.is_down() && input.lookspring.get() {
                 view().start_pitch_drift();
             }
         });
         hook_command_key!(engine, "jlook", input().in_jlook);
         hook_command_key!(engine, "duck", input().in_duck);
+        hook_command_key!(engine, "run", input().in_run);
         hook_command_key!(engine, "reload", input().in_reload);
         hook_command_key!(engine, "alt1", input().in_alt1);
         hook_command_key!(engine, "score", input().in_score, down {
@@ -214,19 +247,11 @@ impl Input {
             // TODO: joystick
         });
 
-        let in_graph = Box::new(KeyButton::new(engine));
-        let in_mlook = Box::new(KeyButton::new(engine));
-        let in_jlook = Box::new(KeyButton::new(engine));
-
-        let mut keys = KeyList::new();
-        keys.add(c"in_graph", (*in_graph).as_ptr());
-        keys.add(c"in_mlook", (*in_mlook).as_ptr());
-        keys.add(c"in_jlook", (*in_jlook).as_ptr());
+        let mut keys = KeyList::new(engine);
 
         Self {
             engine,
 
-            keys,
             oldangles: vec3_t::ZERO,
             mouse: Mouse::new(),
 
@@ -248,31 +273,34 @@ impl Input {
             mouse_x: 0.0,
             mouse_y: 0.0,
 
-            in_graph,
-            in_mlook,
-            in_jlook,
-            in_klook: KeyButton::new(engine),
-            in_left: KeyButton::new(engine),
-            in_right: KeyButton::new(engine),
-            in_forward: KeyButton::new(engine),
-            in_back: KeyButton::new(engine),
-            in_lookup: KeyButton::new(engine),
-            in_lookdown: KeyButton::new(engine),
-            in_moveleft: KeyButton::new(engine),
-            in_moveright: KeyButton::new(engine),
-            in_strafe: KeyButton::new(engine),
-            in_speed: KeyButton::new(engine),
-            in_use: KeyButton::new(engine),
-            in_jump: KeyButton::new(engine),
-            in_attack: KeyButton::new(engine),
-            in_attack2: KeyButton::new(engine),
-            in_up: KeyButton::new(engine),
-            in_down: KeyButton::new(engine),
-            in_duck: KeyButton::new(engine),
-            in_reload: KeyButton::new(engine),
-            in_alt1: KeyButton::new(engine),
-            in_score: KeyButton::new(engine),
-            in_break: KeyButton::new(engine),
+            in_graph: keys.add(c"in_graph", &IN_GRAPH),
+            in_mlook: keys.add(c"in_mlook", &IN_MLOOK),
+            in_jlook: keys.add(c"in_jlook", &IN_JLOOK),
+            in_klook: keys.add(c"in_klook", &IN_KLOOK),
+            in_left: keys.add(c"in_left", &IN_LEFT),
+            in_right: keys.add(c"in_right", &IN_RIGHT),
+            in_forward: keys.add(c"in_forward", &IN_FORWARD),
+            in_back: keys.add(c"in_back", &IN_BACK),
+            in_lookup: keys.add(c"in_lookup", &IN_LOOKUP),
+            in_lookdown: keys.add(c"in_lookdown", &IN_LOOKDOWN),
+            in_moveleft: keys.add(c"in_moveleft", &IN_MOVELEFT),
+            in_moveright: keys.add(c"in_moveright", &IN_MOVERIGHT),
+            in_strafe: keys.add(c"in_strafe", &IN_STRAFE),
+            in_speed: keys.add(c"in_speed", &IN_SPEED),
+            in_use: keys.add(c"in_use", &IN_USE),
+            in_jump: keys.add(c"in_jump", &IN_JUMP),
+            in_attack: keys.add(c"in_attack", &IN_ATTACK),
+            in_attack2: keys.add(c"in_attack2", &IN_ATTACK2),
+            in_up: keys.add(c"in_up", &IN_UP),
+            in_down: keys.add(c"in_down", &IN_DOWN),
+            in_duck: keys.add(c"in_duck", &IN_DUCK),
+            in_run: keys.add(c"in_run", &IN_RUN),
+            in_reload: keys.add(c"in_reload", &IN_RELOAD),
+            in_alt1: keys.add(c"in_alt1", &IN_ALT1),
+            in_score: keys.add(c"in_score", &IN_SCORE),
+            in_break: keys.add(c"in_break", &IN_BREAK),
+
+            keys,
 
             lookstrafe: engine
                 .create_cvar(c"lookstrafe", c"0", cvar::ARCHIVE)
@@ -358,11 +386,6 @@ impl Input {
         self.mouse_oldbuttonstate = 0;
     }
 
-    pub fn shutdown(&mut self) {
-        self.deactivate_mouse();
-        self.keys.clear();
-    }
-
     fn use_raw_input(&self) -> bool {
         self.m_rawinput.get()
     }
@@ -394,74 +417,29 @@ impl Input {
         self.in_mlook.state()
     }
 
-    pub fn button_bits(&self, reset_state: bool, show_score: bool) -> c_int {
+    pub fn button_bits(&self, reset_state: bool, show_score: bool) -> u32 {
         let mut bits = 0;
-
-        macro_rules! set {
-            ($($name:expr => $bits:expr),* $(,)?) => (
-                $(if $name.state().intersects(KeyState::ANY_DOWN) {
-                    bits |= $bits;
-                })*
-            );
+        for i in self.keys.list.iter().filter(|i| i.kb.bits() != 0) {
+            if i.kb.is_down_or_impulse_down() {
+                bits |= i.kb.bits();
+            }
+            if reset_state {
+                i.kb.with_state(|f| f.difference(KeyState::IMPULSE_DOWN));
+            }
         }
-
-        set! {
-            self.in_attack => consts::IN_ATTACK,
-            self.in_duck => consts::IN_DUCK,
-            self.in_jump => consts::IN_JUMP,
-            self.in_forward => consts::IN_FORWARD,
-            self.in_back => consts::IN_BACK,
-            self.in_use => consts::IN_USE,
-            self.in_left => consts::IN_LEFT,
-            self.in_right => consts::IN_RIGHT,
-            self.in_moveleft => consts::IN_MOVELEFT,
-            self.in_moveright => consts::IN_MOVERIGHT,
-            self.in_attack2 => consts::IN_ATTACK2,
-            self.in_reload => consts::IN_RELOAD,
-            self.in_alt1 => consts::IN_ALT1,
-            self.in_score => consts::IN_SCORE,
-        }
-
         if self.in_cancel.get() {
-            bits |= consts::IN_CANCEL;
+            bits |= consts::IN_CANCEL as u32;
         }
-
         if show_score {
-            bits |= consts::IN_SCORE;
+            bits |= consts::IN_SCORE as u32;
         }
-
-        if reset_state {
-            macro_rules! reset {
-                ($($name:expr),* $(,)?) => (
-                    $($name.with_state(|f| f.difference(KeyState::IMPULSE_DOWN));)*
-                );
-            }
-            reset! {
-                self.in_attack,
-                self.in_duck,
-                self.in_jump,
-                self.in_forward,
-                self.in_back,
-                self.in_use,
-                self.in_left,
-                self.in_right,
-                self.in_moveleft,
-                self.in_moveright,
-                self.in_attack2,
-                self.in_reload,
-                self.in_alt1,
-                self.in_score,
-            }
-        }
-
         bits
     }
 
-    pub fn reset_button_bits(&self, bits: c_int, show_score: bool) {
+    pub fn reset_button_bits(&self, bits: u32, show_score: bool) {
         let bits_new = self.button_bits(false, show_score) ^ bits;
-
-        if bits_new & consts::IN_ATTACK != 0 {
-            if bits & consts::IN_ATTACK != 0 {
+        if bits_new & consts::IN_ATTACK as u32 != 0 {
+            if bits & consts::IN_ATTACK as u32 != 0 {
                 self.in_attack.key_down();
             } else {
                 self.in_attack.set_state(KeyState::NONE);
@@ -524,16 +502,14 @@ impl Input {
         }
     }
 
-    fn scale_mouse(&mut self) {
+    fn scale_mouse(&mut self, hud: &Hud) {
         let mx = self.mouse_x;
         let my = self.mouse_y;
 
-        let hud = hud();
-        let mouse_senstivity = if hud.get_sensitivity() != 0.0 {
-            hud.get_sensitivity()
-        } else {
-            self.get_mouse_sensitivity()
-        };
+        let mut mouse_senstivity = hud.get_sensitivity();
+        if mouse_senstivity == 0.0 {
+            mouse_senstivity = self.get_mouse_sensitivity()
+        }
 
         if self.m_customaccel.get() != 0.0 {
             let raw_mouse_movement_distance = sqrt((mx * mx + my * my) as f64);
@@ -565,16 +541,16 @@ impl Input {
         }
     }
 
-    fn mouse_move(&mut self, _frametime: f32, cmd: &mut usercmd_s) {
+    fn mouse_move(&mut self, hud: &Hud, view: &View, _frametime: f32, cmd: &mut usercmd_s) {
         let engine = self.engine;
         let mut viewangles = engine.get_view_angles();
 
         let in_mlook_state = self.in_mlook.state();
         if in_mlook_state.contains(KeyState::DOWN) {
-            view().stop_pitch_drift();
+            view.stop_pitch_drift();
         }
 
-        if !self.mouse_in_use.get() && !hud().state.intermission() && !self.mouse_visible {
+        if !self.mouse_in_use.get() && !hud.state.intermission() && !self.mouse_visible {
             let (dx, dy) = self.get_relative_mouse_pos();
 
             let mx = dx + self.mx_accum;
@@ -594,7 +570,7 @@ impl Input {
             self.old_mouse_x = mx;
             self.old_mouse_y = my;
 
-            self.scale_mouse();
+            self.scale_mouse(hud);
 
             if self.in_strafe.is_down()
                 || self.lookstrafe.get() && in_mlook_state.contains(KeyState::DOWN)
@@ -622,7 +598,7 @@ impl Input {
         engine.set_view_angles(viewangles);
     }
 
-    fn adjust_angles(&self, frametime: f32, viewangles: &mut vec3_t) {
+    fn adjust_angles(&self, view: &View, frametime: f32, viewangles: &mut vec3_t) {
         let speed = if self.in_speed.is_down() {
             frametime * self.cl_anglespeedkey.get()
         } else {
@@ -638,7 +614,7 @@ impl Input {
 
         let pitchspeed = self.cl_pitchspeed.get();
         if self.in_klook.is_down() {
-            view().stop_pitch_drift();
+            view.stop_pitch_drift();
             viewangles[PITCH] -= speed * pitchspeed * self.in_forward.key_state();
             viewangles[PITCH] += speed * pitchspeed * self.in_back.key_state();
         }
@@ -650,7 +626,7 @@ impl Input {
         viewangles[PITCH] += speed * pitchspeed * down;
 
         if up != 0.0 || down != 0.0 {
-            view().stop_pitch_drift();
+            view.stop_pitch_drift();
         }
 
         let pitchdown = self.cl_pitchdown.get();
@@ -679,21 +655,27 @@ impl Input {
         self.mouse_oldbuttonstate = mstate;
     }
 
-    fn in_move(&mut self, frametime: f32, cmd: &mut usercmd_s) {
+    fn in_move(&mut self, hud: &Hud, view: &View, frametime: f32, cmd: &mut usercmd_s) {
         if !self.mouse_in_use.get() && self.mouse_active {
-            self.mouse_move(frametime, cmd);
+            self.mouse_move(hud, view, frametime, cmd);
         }
 
         // TODO: joystick
     }
 
-    pub fn create_move(&mut self, frametime: f32, active: bool) -> usercmd_s {
+    pub fn create_move(
+        &mut self,
+        hud: &Hud,
+        view: &View,
+        frametime: f32,
+        active: bool,
+    ) -> usercmd_s {
         let engine = self.engine;
         let mut cmd: usercmd_s = unsafe { mem::zeroed() };
 
         if active {
             let mut viewangles = engine.get_view_angles();
-            self.adjust_angles(frametime, &mut viewangles);
+            self.adjust_angles(view, frametime, &mut viewangles);
             engine.set_view_angles(viewangles);
 
             if self.in_strafe.is_down() {
@@ -740,15 +722,12 @@ impl Input {
                 }
             }
 
-            self.in_move(frametime, &mut cmd);
+            self.in_move(hud, view, frametime, &mut cmd);
         }
 
         cmd.impulse = self.in_impulse.take();
-
-        cmd.weaponselect = hud().items.get_mut::<WeaponMenu>().take_weapon_select() as u8;
-
-        let show_score = hud().show_score();
-        cmd.buttons = self.button_bits(true, show_score) as u16;
+        cmd.weaponselect = hud.take_weapon_select() as u8;
+        cmd.buttons = self.button_bits(true, hud.show_score()) as u16;
 
         let viewangles = engine.get_view_angles();
         if unsafe { helpers::g_iAlive != 0 } {

@@ -279,7 +279,7 @@ impl HudItem for WeaponMenu {
     }
 
     fn think(&mut self, state: &State) {
-        if self.active != Select::None && state.key_bits() & consts::IN_ATTACK != 0 {
+        if self.active != Select::None && state.key_bits() & consts::IN_ATTACK as u32 != 0 {
             let engine = self.engine;
 
             if let Select::Weapon(id, _, _) = self.active {
@@ -293,7 +293,7 @@ impl HudItem for WeaponMenu {
             self.last = self.active;
             self.active = Select::None;
 
-            state.with_key_bits(|bits| bits & !consts::IN_ATTACK);
+            state.with_key_bits(|bits| bits & !consts::IN_ATTACK as u32);
 
             engine.play_sound_by_name(c"common/wpn_select.wav", 1.0);
         }

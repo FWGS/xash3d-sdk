@@ -6,34 +6,68 @@ use crate::prelude::*;
 
 pub use xash3d_shared::input::*;
 
-pub struct KeyButton {
-    engine: ClientEngineRef,
+/// Key button data.
+pub struct KeyButtonData {
     raw: UnsafeCell<kbutton_t>,
+    bits: u32,
 }
 
-impl KeyButton {
-    pub fn new(engine: ClientEngineRef) -> Self {
+// SAFETY: only used by KeyButton from the engine thread
+unsafe impl Sync for KeyButtonData {}
+
+impl KeyButtonData {
+    /// Creates a new key button data.
+    #[allow(clippy::new_without_default)]
+    pub const fn new() -> Self {
+        Self::with_bits(0)
+    }
+
+    /// Creates a new key button data with button bits.
+    pub const fn with_bits(bits: u32) -> Self {
         Self {
-            engine,
             raw: UnsafeCell::new(kbutton_t {
                 down: [0; 2],
                 state: 0,
             }),
+            bits,
         }
     }
 
-    pub fn as_ptr(&self) -> *mut kbutton_t {
+    fn get(&self) -> *mut kbutton_t {
         self.raw.get()
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct KeyButton {
+    engine: ClientEngineRef,
+    data: &'static KeyButtonData,
+}
+
+impl KeyButton {
+    pub const fn new(engine: ClientEngineRef, data: &'static KeyButtonData) -> Self {
+        Self { engine, data }
+    }
+
+    pub fn as_ptr(&self) -> *mut kbutton_t {
+        self.data.get()
+    }
+
+    /// Button bits for this button.
+    ///
+    /// Used to set [usercmd_s.buttons](xash3d_ffi::common::usercmd_s.buttons).
+    pub fn bits(&self) -> u32 {
+        self.data.bits
     }
 
     pub fn state(&self) -> KeyState {
-        let state = unsafe { (*self.raw.get()).state };
+        let state = unsafe { (*self.as_ptr()).state };
         KeyState::from_bits_retain(state)
     }
 
     pub fn set_state(&self, state: KeyState) {
         unsafe {
-            (*self.raw.get()).state = state.bits();
+            (*self.as_ptr()).state = state.bits();
         }
     }
 
@@ -42,7 +76,7 @@ impl KeyButton {
     }
 
     pub fn is_down(&self) -> bool {
-        self.state().contains(KeyState::DOWN)
+        self.state().intersects(KeyState::DOWN)
     }
 
     pub fn is_up(&self) -> bool {
@@ -57,10 +91,19 @@ impl KeyButton {
         self.state().intersects(KeyState::IMPULSE_UP)
     }
 
+    pub fn is_down_or_impulse_down(&self) -> bool {
+        self.state()
+            .intersects(KeyState::DOWN | KeyState::IMPULSE_DOWN)
+    }
+
     pub fn clear(&self) {
         unsafe {
-            (*self.raw.get()).down.fill(0);
+            (*self.as_ptr()).down.fill(0);
         }
+    }
+
+    pub fn reset(&self) {
+        unsafe { self.as_ptr().write_bytes(0, 1) }
     }
 
     pub fn key_down(&self) {
@@ -72,7 +115,7 @@ impl KeyButton {
             -1
         };
 
-        let down = unsafe { &mut (*self.raw.get()).down };
+        let down = unsafe { &mut (*self.as_ptr()).down };
         if !down.contains(&k) {
             if let Some(i) = down.iter_mut().find(|i| **i == 0) {
                 *i = k;
@@ -89,7 +132,7 @@ impl KeyButton {
         if !s.is_empty() {
             let k = s.to_str().ok().and_then(|s| s.parse().ok()).unwrap_or(0);
 
-            let down = unsafe { &mut (*self.raw.get()).down };
+            let down = unsafe { &mut (*self.as_ptr()).down };
             if let Some(i) = down.iter_mut().find(|i| **i == k) {
                 *i = 0;
 
